@@ -15,7 +15,7 @@
               <span class="link-text">首页</span>
             </a>
             <!-- 当前讲座按钮（恢复并美化，显示真实数据） -->
-            <div class="lecture-info-dropdown" v-if="getUserRole() && getCurrentLecture()">
+            <div class="lecture-info-dropdown" v-if="getUserRole() && getCurrentLecture() && !isHomePage">
               <a href="#" class="nav-link" @click.prevent="toggleLectureInfo" :class="{ active: showLectureInfo }">
                 <span class="link-icon">📚</span>
                 <span class="link-text">当前讲座</span>
@@ -216,22 +216,19 @@ const handleClickOutside = (event) => {
 // 修改个人信息
 const handleEditProfile = () => {
   showSettingsDropdown.value = false
-  // TODO: 实现修改个人信息功能
-  alert('修改个人信息功能开发中...')
+  router.push('/profile/edit') // 跳转到修改个人信息页面
 }
 
 // 修改密码
 const handleChangePassword = () => {
   showSettingsDropdown.value = false
-  // TODO: 实现修改密码功能
-  alert('修改密码功能开发中...')
+  router.push('/profile/change-password') // 跳转到修改密码页面
 }
 
 // 账号设置
 const handleAccountSettings = () => {
   showSettingsDropdown.value = false
-  // TODO: 实现账号设置功能
-  alert('账号设置功能开发中...')
+  router.push('/profile/settings') // 跳转到账号设置页面
 }
 
 // 生命周期钩子
@@ -430,35 +427,8 @@ const handleEndLecture = async () => {
 }
 
 // 首页按钮点击处理
-const handleHomeClick = async () => {
-  const userRole = getUserRole()
-  if (userRole === 'organizer') {
-    router.push('/organizer')
-    return
-  }
-  if (userRole === 'speaker') {
-    // 检查是否在讲座中
-    if (route.path.includes('/lecture/')) {
-      if (confirm('点击首页将退出当前讲座，确定要继续吗？')) {
-        try {
-          await exitCurrentLecture()
-          // 标记这是通过首页按钮的合法导航
-          sessionStorage.setItem('homeButtonClicked', 'true')
-          router.push('/speaker/home')
-        } catch (error) {
-          // 如果退出讲座失败，不进行导航
-          console.error('退出讲座失败，取消导航:', error)
-        }
-      }
-    } else {
-      // 标记这是通过首页按钮的合法导航
-      sessionStorage.setItem('homeButtonClicked', 'true')
-      router.push('/speaker/home')
-    }
-  } else if (userRole === 'listener') {
-    // 听众点击首页时，不退出讲座，直接导航到首页
-    router.push('/listener/home')
-  }
+const handleHomeClick = () => {
+  router.push('/'); // 跳转到首页路径
 }
 
 // 退出登录处理
@@ -864,6 +834,7 @@ const startHeartbeat = () => {
     await sendHeartbeat()
   }, 30000) // 30秒
   
+
   console.log('心跳定时器已启动')
 }
 

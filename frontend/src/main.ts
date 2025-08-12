@@ -1,4 +1,3 @@
-
 import { createApp } from 'vue'
 import App from './App.vue'
 import { createRouter, createWebHistory } from 'vue-router'
@@ -24,6 +23,9 @@ import SpeakerUpload from './main/resources/pages/speaker/Upload.vue'
 import SpeakerStats from './main/resources/pages/speaker/Stats.vue'
 import SpeakerDiscussion from './main/resources/pages/speaker/Discussion.vue'
 import SpeakerFeedback from './main/resources/pages/speaker/Feedback.vue'
+import EditProfile from './main/resources/pages/profile/EditProfile.vue'
+import ChangePassword from './main/resources/pages/profile/ChangePassword.vue'
+import AccountSettings from './main/resources/pages/profile/AccountSettings.vue'
 
 // 路由配置
 const routes = [
@@ -72,7 +74,11 @@ const routes = [
       { path: 'discussion', component: OrganizerDiscussionPage },
       { path: 'feedback', component: OrganizerFeedbackPage }
     ]
-  }
+  },
+  // profile 路由
+  { path: '/profile/edit', component: EditProfile },
+  { path: '/profile/change-password', component: ChangePassword },
+  { path: '/profile/settings', component: AccountSettings },
 ];
 
 const router = createRouter({

@@ -68,7 +68,7 @@
           </div>
         </div>
 
-        <!-- 创建讲座模态框 -->
+        <!-- 加入讲座模态框 -->
         <div v-if="showCreate" class="modal-bg" @click.self="showCreate = false">
           <div class="modal">
             <div class="modal-header">

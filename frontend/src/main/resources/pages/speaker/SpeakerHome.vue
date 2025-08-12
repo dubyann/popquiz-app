@@ -30,7 +30,7 @@
           
           <div v-if="lectures.length === 0" class="empty-state">
             <div class="empty-icon">📝</div>
-            <p>暂无讲座内容</p>
+            <p>暂无创建任何讲座</p>
             <span>点击"创建新讲座"开始吧</span>
           </div>
           
@@ -534,21 +534,23 @@ async function restartLecture(id: number) {
 
 .lectures-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  gap: 1.5rem;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 2rem;
   width: 100%;
+  padding: 0 1rem;
 }
 
 .lecture-card {
   background: rgba(255, 255, 255, 0.8);
   backdrop-filter: blur(10px);
   border: 1px solid rgba(148, 163, 184, 0.2);
-  border-radius: 20px;
-  padding: 1.8rem;
+  border-radius: 16px;
+  padding: 0.8rem;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
   overflow: hidden;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  cursor: pointer;
 }
 
 .lecture-card::before {
