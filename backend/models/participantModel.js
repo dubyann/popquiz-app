@@ -58,7 +58,7 @@ async function hasUserEverJoined(lectureId, userId) {
  */
 async function getLectureParticipants(lectureId) {
   const sql = `
-    SELECT lp.*, u.username, u.nickname 
+    SELECT lp.*, u.username, u.username AS nickname 
     FROM lecture_participants lp
     JOIN users u ON lp.user_id = u.id
     WHERE lp.lecture_id = ? AND lp.status = 'joined'
@@ -77,7 +77,7 @@ async function getUserJoinedLectures(userId) {
            lp.status as participant_status,
            l.title, l.description, l.created_at as lecture_created_at, 
            l.status as lecture_status,
-           u.nickname as speaker_name
+           u.username as speaker_name
     FROM lecture_participants lp
     JOIN lectures l ON lp.lecture_id = l.id
     JOIN users u ON l.speaker_id = u.id

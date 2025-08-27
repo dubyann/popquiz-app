@@ -105,7 +105,7 @@ const getLectureReview = async (req, res) => {
     const [rankingRows] = await pool.promise().query(
       `SELECT 
         u.id as user_id,
-        u.nickname,
+    u.username,
         COUNT(qa.id) as answered_count,
         SUM(qa.is_correct) as correct_count,
         (SUM(qa.is_correct) / COUNT(qa.id) * 100) as accuracy
@@ -113,7 +113,7 @@ const getLectureReview = async (req, res) => {
        JOIN quiz_answers qa ON u.id = qa.user_id
        JOIN quizzes q ON qa.quiz_id = q.id
        WHERE q.lecture_id = ?
-       GROUP BY u.id, u.nickname
+  GROUP BY u.id, u.username
        HAVING answered_count > 0
        ORDER BY accuracy DESC, correct_count DESC`,
       [lectureId]
@@ -312,7 +312,7 @@ const getLectureParticipants = async (req, res) => {
       participants: participants.map(p => ({
         user_id: p.user_id,
         username: p.username,
-        nickname: p.nickname,
+  nickname: p.nickname,
         joined_at: p.joined_at
       }))
     };

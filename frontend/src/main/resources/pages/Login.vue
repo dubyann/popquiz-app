@@ -25,8 +25,8 @@
       <form @submit.prevent="handleLogin">
         <div class="input-group">
           <input 
-            v-model="username" 
-            placeholder="用户名" 
+            v-model="loginUsername" 
+            placeholder="用户名/邮箱/手机号" 
             required 
             class="input"
             :class="{ 'input-error': errors.username }"
@@ -50,7 +50,7 @@
         
         <div class="input-group">
           <select 
-            v-model="role" 
+            v-model="logRole" 
             required 
             class="input"
             :class="{ 'input-error': errors.role }"
@@ -83,157 +83,76 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useRouter, onBeforeRouteLeave } from 'vue-router'
 import axios from 'axios'
+import { useAuthStore } from '../../../stores/auth'
+import { storeToRefs } from 'pinia'
+import { formatErrorMessage } from '../../../utils/errorHandler'
 
-const username = ref('')
-const password = ref('')
-const role = ref('')
 const router = useRouter()
+const auth = useAuthStore()
 
-// 状态管理
-const isLoading = ref(false)
-const errorMessage = ref('')
-const successMessage = ref('')
-const errors = ref({
-  username: '',
-  password: '',
-  role: ''
+// 从 Pinia 中解构表单/错误/消息相关状态，包含登录专属字段 logRole 和 isLoading
+const { loginUsername, errors, errorMessage, successMessage, logRole, isLoading } = storeToRefs(auth)
+// password 保持在组件本地，避免明文保存在全局 store
+const password = ref('')
+// 清理敏感字段函数（供路由离开及页面失焦/隐藏时调用）
+function clearSensitive() {
+  password.value = ''
+  // 清除字段错误提示
+  try { clearFieldError('password') } catch (e) { /* ignore */ }
+}
+
+// 在路由离开时清理
+onBeforeRouteLeave((to, from, next) => {
+  clearSensitive()
+  next()
 })
+
+// 在页面隐藏或失焦时清理（更严格的策略）
+onMounted(() => {
+  const onVisibility = () => { if (document.hidden) clearSensitive() }
+  const onBlur = () => clearSensitive()
+  window.addEventListener('visibilitychange', onVisibility)
+  window.addEventListener('blur', onBlur)
+  // 卸载时移除监听
+  onUnmounted(() => {
+    window.removeEventListener('visibilitychange', onVisibility)
+    window.removeEventListener('blur', onBlur)
+  })
+})
+// 从 store 获取清理函数与校验函数
+const { clearFieldError, clearMessages, validateLogin } = auth
 
 // 表单验证
 const isFormValid = computed(() => {
-  return username.value.trim() && 
+  return loginUsername.value.trim() && 
          password.value.trim() && 
-         role.value && 
+         logRole.value && 
          !Object.values(errors.value).some(error => error)
 })
 
-// 清除字段错误
-const clearFieldError = (field: string) => {
-  errors.value[field] = ''
-  if (errorMessage.value) {
-    errorMessage.value = ''
-  }
-}
-
-// 清除所有提示信息
-const clearMessages = () => {
-  errorMessage.value = ''
-  successMessage.value = ''
-  errors.value = {
-    username: '',
-    password: '',
-    role: ''
-  }
-}
-
-// 表单验证
-const validateForm = () => {
-  clearMessages()
-  let isValid = true
-
-  // 用户名验证
-  if (!username.value.trim()) {
-    errors.value.username = '请输入用户名'
-    isValid = false
-  } else if (username.value.trim().length < 2) {
-    errors.value.username = '用户名至少需要2个字符'
-    isValid = false
-  } else if (username.value.trim().length > 20) {
-    errors.value.username = '用户名不能超过20个字符'
-    isValid = false
-  } else if (!/^[a-zA-Z0-9_\u4e00-\u9fa5]+$/.test(username.value.trim())) {
-    errors.value.username = '用户名只能包含字母、数字、下划线和中文'
-    isValid = false
-  }
-
-  // 密码验证
-  if (!password.value) {
-    errors.value.password = '请输入密码'
-    isValid = false
-  } else if (password.value.length < 4) {
-    errors.value.password = '密码至少需要4个字符'
-    isValid = false
-  } else if (password.value.length > 50) {
-    errors.value.password = '密码不能超过50个字符'
-    isValid = false
-  }
-
-  // 角色验证
-  if (!role.value) {
-    errors.value.role = '请选择用户角色'
-    isValid = false
-  } else if (!['listener', 'speaker', 'organizer'].includes(role.value)) {
-    errors.value.role = '请选择有效的用户角色'
-    isValid = false
-  }
-
-  return isValid
-}
-
-// 错误处理函数
+// 错误处理（复用通用格式化，同时对登录场景做特定提示覆盖）
 const handleError = (error: any) => {
   console.error('登录错误:', error)
-  
-  if (error.response) {
-    // 服务器返回错误响应
-    const status = error.response.status
-    const data = error.response.data
-    
-    switch (status) {
-      case 400:
-        if (data.error?.includes('用户名')) {
-          errorMessage.value = '用户名格式不正确，请检查输入'
-        } else if (data.error?.includes('密码')) {
-          errorMessage.value = '密码格式不正确，请检查输入'
-        } else {
-          errorMessage.value = data.error || '请求参数错误，请检查输入信息'
-        }
-        break
-      case 401:
-        errorMessage.value = '用户名或密码错误，请重新输入'
-        break
-      case 403:
-        errorMessage.value = '账号已被禁用或权限不足，请联系管理员'
-        break
-      case 404:
-        errorMessage.value = '用户不存在，请检查用户名或先注册账号'
-        break
-      case 429:
-        errorMessage.value = '登录尝试过于频繁，请稍后再试'
-        break
-      case 500:
-        errorMessage.value = '服务器内部错误，请稍后重试或联系技术支持'
-        break
-      case 502:
-        errorMessage.value = '服务器网关错误，请稍后重试'
-        break
-      case 503:
-        errorMessage.value = '服务暂时不可用，请稍后重试'
-        break
-      default:
-        errorMessage.value = data.error || `登录失败 (错误代码: ${status})，请稍后重试`
-    }
-  } else if (error.request) {
-    // 网络错误
-    if (error.code === 'ERR_NETWORK' || error.message.includes('Network Error')) {
-      errorMessage.value = '无法连接到服务器，请检查：\n1. 网络连接是否正常\n2. 后端服务是否启动 (端口: 3001)\n3. 防火墙是否阻止连接'
-    } else if (error.code === 'ECONNREFUSED') {
-      errorMessage.value = '服务器拒绝连接，请确认后端服务已启动'
-    } else {
-      errorMessage.value = '网络请求超时或失败，请检查网络连接'
-    }
-  } else {
-    // 其他错误
-    errorMessage.value = '登录过程中出现未知错误，请刷新页面后重试'
-  }
+  const baseMsg = formatErrorMessage(error)
+  const status = error?.response?.status
+
+  // 登录场景的特定状态提示优先于通用提示
+  if (status === 401) { errorMessage.value = '用户名或密码错误，请重新输入'; return }
+  if (status === 403) { errorMessage.value = '账号已被禁用或权限不足，请联系管理员'; return }
+  if (status === 404) { errorMessage.value = '用户不存在，请检查用户名或先注册账号'; return }
+  if (status === 502) { errorMessage.value = '服务器网关错误，请稍后重试'; return }
+  if (status === 503) { errorMessage.value = '服务暂时不可用，请稍后重试'; return }
+
+  // 其余情况使用通用格式化结果
+  errorMessage.value = baseMsg
 }
 
 const handleLogin = async () => {
   // 表单验证
-  if (!validateForm()) {
+  if (!validateLogin(password.value)) {
     return
   }
 
@@ -241,54 +160,52 @@ const handleLogin = async () => {
   clearMessages()
 
   try {
-    console.log('正在登录...', { 用户名: username.value, 角色: role.value })
+  console.log('正在登录...', { 用户名: loginUsername.value, 角色: logRole.value })
     
     const res = await axios.post('/api/auth/login', { 
-      username: username.value.trim(), 
+      username: loginUsername.value.trim(), 
       password: password.value, 
-      role: role.value 
+      role: logRole.value 
     })
     
     console.log('登录响应:', res.data)
     
     if (res.data.message === '登录成功' && res.data.token) {
-      // 登录成功 - 同步写入 sessionStorage 和 localStorage
-      sessionStorage.setItem('token', res.data.token)
-      sessionStorage.setItem('userRole', res.data.role || role.value)
-      sessionStorage.setItem('username', username.value)
-      sessionStorage.setItem('nickname', res.data.nickname || username.value)
-      localStorage.setItem('token', res.data.token)
-      localStorage.setItem('userRole', res.data.role || role.value)
-      localStorage.setItem('username', username.value)
-      localStorage.setItem('nickname', res.data.nickname || username.value)
-      
-      // 新增：登录后获取当前用户信息并存入localStorage
+  // 使用 Pinia 管理 token/user/role，并显式持久化到 localStorage 以兼容旧代码
+  auth.setToken(res.data.token, true)
+      // 登录后获取当前用户信息并存入 localStorage 与 store
       try {
         const userRes = await axios.get('/api/users/me', {
           headers: { Authorization: `Bearer ${res.data.token}` }
         })
         if (userRes.data && userRes.data.id) {
-          localStorage.setItem('user', JSON.stringify(userRes.data))
+          try {
+            localStorage.setItem('user', JSON.stringify(userRes.data))
+          } catch (e) {
+            console.warn('Failed to persist user to localStorage', e)
+          }
+          // 更新 store.user
+          auth.user = userRes.data
         }
       } catch (e) {
         console.error('获取当前用户信息失败', e)
       }
-      
-      const roleText = role.value === 'listener' ? '听众' : 
-                      role.value === 'speaker' ? '演讲者' : '组织者'
-      successMessage.value = `欢迎回来，${res.data.nickname || username.value}！正在跳转到${roleText}页面...`
-      
+
+  const roleText = logRole.value === 'listener' ? '听众' : 
+          logRole.value === 'speaker' ? '演讲者' : '组织者'
+  successMessage.value = `欢迎回来，${res.data.nickname || loginUsername.value}！正在跳转到${roleText}页面...`
+
       // 延迟跳转，让用户看到成功提示
       setTimeout(() => {
-        if (res.data.role === 'listener' || role.value === 'listener') {
+  if (res.data.role === 'listener' || logRole.value === 'listener') {
           router.push('/listener')
-        } else if (res.data.role === 'speaker' || role.value === 'speaker') {
+  } else if (res.data.role === 'speaker' || logRole.value === 'speaker') {
           router.push('/speaker/index')
-        } else if (res.data.role === 'organizer' || role.value === 'organizer') {
+  } else if (res.data.role === 'organizer' || logRole.value === 'organizer') {
           router.push('/organizer')
         }
       }, 1500)
-      
+
     } else {
       // 登录失败但有响应
       errorMessage.value = res.data.error || '登录失败，请检查用户名和密码是否正确'

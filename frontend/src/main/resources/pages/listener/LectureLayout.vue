@@ -15,13 +15,54 @@
 </template>
 
 <script setup lang="ts">
-
+import { computed } from 'vue'
 import { useRoute } from 'vue-router'
+import { useListenerStore } from '../../../../stores/listener'
+import { onMounted, watch } from 'vue'
+
+// 使用路由与 Pinia store（listener 域）
 const route = useRoute()
-const lectureId = route.params.id
-function isActive(tab) {
+const listenerStore = useListenerStore()
+
+// 讲座 ID（始终为字符串），组件和子路由可以使用该值
+const lectureId = computed(() => String(route.params.id || ''))
+
+// 侧边栏是否处于激活状态（用于高亮当前选项）
+function isActive(tab: string) {
   return route.path.includes(`/${tab}`)
 }
+
+// 这里保留 listener store 的引用，未来可以在布局层统一触发
+// 如自动 join、预加载讲座信息或统计（目前尚无额外副作用）
+
+// 自动 join 和预加载逻辑：当布局挂载或 route.params.id 变化时触发一次
+onMounted(async () => {
+  const id = lectureId.value
+  if (!id) return
+  // 如果尚未 join，则尝试 join（避免重复调用）
+  if (!listenerStore.joinedLectures.has(id)) {
+    try {
+      await listenerStore.joinLecture(id)
+    } catch (e) {
+      // join 失败时不阻塞预加载
+      console.warn('auto join failed', e)
+    }
+  }
+  // 并行预加载讲座详情与成绩数据（如果后端支持）
+  listenerStore.fetchLecture(id).catch(() => {})
+  listenerStore.loadScoreData?.(id).catch(() => {})
+})
+
+watch(() => route.params.id, (newVal, oldVal) => {
+  const id = String(newVal || '')
+  if (!id) return
+  // 切换讲座时再次尝试预加载
+  if (!listenerStore.joinedLectures.has(id)) {
+    listenerStore.joinLecture(id).catch(() => {})
+  }
+  listenerStore.fetchLecture(id).catch(() => {})
+  listenerStore.loadScoreData?.(id).catch(() => {})
+})
 </script>
 <style scoped>
 .lecture-layout {

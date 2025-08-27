@@ -143,7 +143,7 @@
 </template>
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
-import axios from 'axios'
+import { useListenerStore } from '../../../../stores/listener'
 import { AuthManager } from '../../../../utils/auth'
 
 interface FeedbackType {
@@ -159,8 +159,9 @@ interface FeedbackHistory {
   created_at: string
 }
 
-// 主要状态
-const feedbackTypes = ref<FeedbackType[]>([])
+// 主要状态（部分由 listener store 提供）
+const listenerStore = useListenerStore()
+const feedbackTypes = listenerStore.feedbackTypes
 const selectedType = ref('')
 const feedbackMessage = ref('')
 const submitted = ref(false)
@@ -170,22 +171,22 @@ const error = ref('')
 // 标签页状态
 const activeTab = ref<'submit' | 'history'>('submit')
 
-// 历史反馈状态
-const feedbackHistory = ref<FeedbackHistory[]>([])
+// 历史反馈状态（存于 store）
+const feedbackHistory = listenerStore.feedbackHistory
 const historyLoading = ref(false)
 
 const canSubmit = computed(() => {
   return selectedType.value || feedbackMessage.value.trim().length > 0
 })
 
-// 获取当前讲座ID（从localStorage/sessionStorage或路由参数）
-const lectureId = ref(localStorage.getItem('currentLectureId') || sessionStorage.getItem('currentLectureId') || '1')
+// 获取当前讲座ID：优先使用 listener store 中预加载的 lectureDetail
+const lectureId = ref(String(listenerStore.lectureDetail?.id || localStorage.getItem('currentLectureId') || sessionStorage.getItem('currentLectureId') || '1'))
 
 onMounted(async () => {
   await loadFeedbackTypes()
   // 监听标签页切换，当切换到历史页面时加载数据
   watch(activeTab, async (newTab) => {
-    if (newTab === 'history' && feedbackHistory.value.length === 0) {
+    if (newTab === 'history' && feedbackHistory.length === 0) {
       await loadFeedbackHistory()
     }
   })
@@ -194,36 +195,21 @@ onMounted(async () => {
 // 加载反馈类型
 async function loadFeedbackTypes() {
   try {
-    const token = AuthManager.getToken()
-    if (!token) {
-      error.value = '请先登录'
-      return
+    await listenerStore.loadFeedbackTypes()
+    console.log('反馈类型加载成功:', feedbackTypes)
+  } catch (err: any) {
+    console.error('加载反馈类型失败:', err)
+    error.value = err.response?.data?.message || '获取反馈类型失败'
+    // 如果 store 未返回类型，保留本地默认
+    if (!feedbackTypes || feedbackTypes.length === 0) {
+      listenerStore.feedbackTypes = [
+        { type: 'too_fast', text: '讲得太快了' },
+        { type: 'too_slow', text: '讲得太慢了' },
+        { type: 'unclear', text: '讲解不清楚' },
+        { type: 'good', text: '讲得很好' },
+        { type: 'other', text: '其他' }
+      ]
     }
-
-    const response = await axios.get('/api/feedback/types', {
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
-    })
-
-    if (response.data.success) {
-      feedbackTypes.value = response.data.data.feedbackTypes
-      console.log('反馈类型加载成功:', feedbackTypes.value)
-    } else {
-      throw new Error(response.data.message || '获取反馈类型失败')
-    }
-  } catch (error: any) {
-    console.error('加载反馈类型失败:', error)
-    error.value = error.response?.data?.message || '获取反馈类型失败'
-    
-    // 使用默认反馈类型作为备选方案
-    feedbackTypes.value = [
-      { type: 'too_fast', text: '讲得太快了' },
-      { type: 'too_slow', text: '讲得太慢了' },
-      { type: 'unclear', text: '讲解不清楚' },
-      { type: 'good', text: '讲得很好' },
-      { type: 'other', text: '其他' }
-    ]
   }
 }
 
@@ -233,97 +219,41 @@ async function submitFeedback() {
   loading.value = true
   error.value = ''
 
-  try {
-    const token = AuthManager.getToken()
-    if (!token) {
-      throw new Error('请先登录')
-    }
-
-    if (!lectureId.value) {
-      throw new Error('讲座ID不能为空')
-    }
-
-    const payload: any = {}
-    
-    // 如果选择了反馈类型，使用反馈类型
-    if (selectedType.value) {
-      payload.feedbackType = selectedType.value
-    } else if (feedbackMessage.value.trim()) {
-      // 如果只填写了文字内容，默认为'other'类型
-      payload.feedbackType = 'other'
-    }
-
-    // 添加文字反馈（如果有）
-    if (feedbackMessage.value.trim()) {
-      payload.feedbackMessage = feedbackMessage.value.trim()
-    }
-
-    console.log('提交反馈数据:', payload)
-    console.log('讲座ID:', lectureId.value)
-    console.log('Token存在:', !!token)
-
     try {
-      const response = await axios.post(`/api/feedback/lecture/${lectureId.value}`, payload, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      })
+      if (!lectureId.value) throw new Error('讲座ID不能为空')
+      const payload: any = {}
+      if (selectedType.value) payload.feedbackType = selectedType.value
+      else if (feedbackMessage.value.trim()) payload.feedbackType = 'other'
+      if (feedbackMessage.value.trim()) payload.feedbackMessage = feedbackMessage.value.trim()
 
-      if (response.data.success) {
-        submitted.value = true
-        console.log('反馈提交成功:', response.data)
-        // 提交成功后清空历史数据，下次切换时重新加载
-        feedbackHistory.value = []
-      } else {
-        throw new Error(response.data.message || '提交反馈失败')
-      }
-    } catch (feedbackError: any) {
-      // 如果提交反馈失败且错误是需要加入讲座，尝试自动加入
-      if (feedbackError.response?.data?.message?.includes('加入讲座')) {
-        console.log('用户未加入讲座，尝试自动加入...')
-        
+      // 通过 store 提交，store 内处理 token/headers
+      await listenerStore.submitFeedback(String(lectureId.value), payload)
+      submitted.value = true
+      // 清空 store 中的历史以便下次重新加载
+      listenerStore.feedbackHistory = []
+    } catch (err: any) {
+      console.error('提交反馈失败:', err)
+      // 如果提示需要加入讲座，尝试通过 store 加入并重试一次
+      const msg = err?.response?.data?.message || err?.message || ''
+      if (msg.includes('加入讲座')) {
         try {
-          await axios.post(`/api/participants/join/${lectureId.value}`, {}, {
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json'
-            }
+          await listenerStore.joinLecture(String(lectureId.value))
+          await listenerStore.submitFeedback(String(lectureId.value), {
+            feedbackType: selectedType.value || 'other',
+            feedbackMessage: feedbackMessage.value.trim()
           })
-          
-          console.log('已自动加入讲座，重新提交反馈...')
-          
-          // 重新提交反馈
-          const retryResponse = await axios.post(`/api/feedback/lecture/${lectureId.value}`, payload, {
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json'
-            }
-          })
-
-          if (retryResponse.data.success) {
-            submitted.value = true
-            console.log('反馈提交成功:', retryResponse.data)
-            feedbackHistory.value = []
-          } else {
-            throw new Error(retryResponse.data.message || '提交反馈失败')
-          }
-        } catch (joinError: any) {
-          console.error('加入讲座失败:', joinError)
-          throw feedbackError // 抛出原始错误
+          submitted.value = true
+          listenerStore.feedbackHistory = []
+        } catch (secondErr: any) {
+          console.error('自动加入并重试反馈失败:', secondErr)
+          error.value = secondErr?.response?.data?.message || secondErr?.message || '提交反馈失败'
         }
       } else {
-        throw feedbackError
+        error.value = msg || '提交反馈失败'
       }
+    } finally {
+      loading.value = false
     }
-
-  } catch (error: any) {
-    console.error('提交反馈失败:', error)
-    console.error('错误详情:', error.response?.data)
-    error.value = error.response?.data?.message || error.message || '提交反馈失败'
-  } finally {
-    loading.value = false
-  }
 }
 
 function resetForm() {
@@ -337,7 +267,7 @@ function resetForm() {
 function viewHistory() {
   submitted.value = false
   activeTab.value = 'history'
-  if (feedbackHistory.value.length === 0) {
+  if (feedbackHistory.length === 0) {
     loadFeedbackHistory()
   }
 }
@@ -345,36 +275,13 @@ function viewHistory() {
 // 加载反馈历史
 async function loadFeedbackHistory() {
   historyLoading.value = true
-  
   try {
-    const token = AuthManager.getToken()
-    if (!token) {
-      error.value = '请先登录'
-      return
-    }
-
-    if (!lectureId.value) {
-      error.value = '讲座ID不能为空'
-      return
-    }
-
-    const response = await axios.get(`/api/feedback/lecture/${lectureId.value}/my-history`, {
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
-    })
-
-    if (response.data.success) {
-      feedbackHistory.value = response.data.data.history || []
-      console.log('反馈历史加载成功:', feedbackHistory.value.length, '条')
-    } else {
-      throw new Error(response.data.message || '获取反馈历史失败')
-    }
-
-  } catch (error: any) {
-    console.error('加载反馈历史失败:', error)
-    error.value = error.response?.data?.message || '获取反馈历史失败'
-    feedbackHistory.value = []
+    await listenerStore.loadFeedbackHistory(String(lectureId.value))
+    console.log('反馈历史加载成功:', feedbackHistory.length, '条')
+  } catch (err: any) {
+    console.error('加载反馈历史失败:', err)
+    error.value = err?.response?.data?.message || '获取反馈历史失败'
+    listenerStore.feedbackHistory = []
   } finally {
     historyLoading.value = false
   }

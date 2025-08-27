@@ -24,43 +24,26 @@
   </div>
 </template>
 
-<script setup>
-import { ref, onMounted } from 'vue';
-import axios from 'axios';
+<script setup lang="ts">
+import { storeToRefs } from 'pinia'
+import { useProfileStore } from '../../../../stores/profile'
+import { onMounted } from 'vue'
 
-const settings = ref({
-  notifications: 'all',
-  theme: 'light'
-});
-const loading = ref(false);
-const error = ref(null);
-
-const fetchSettings = async () => {
-  loading.value = true;
-  try {
-    const response = await axios.get('/api/settings');
-    settings.value = response.data;
-  } catch (err) {
-    error.value = '加载设置失败';
-  } finally {
-    loading.value = false;
-  }
-};
+const profileStore = useProfileStore()
+const { settings, loading, error } = storeToRefs(profileStore)
 
 const submitSettings = async () => {
-  loading.value = true;
-  error.value = null;
   try {
-    await axios.put('/api/settings', settings.value);
-    alert('设置已保存！');
-  } catch (err) {
-    error.value = '保存失败，请稍后重试';
-  } finally {
-    loading.value = false;
+    await profileStore.updateSettings(settings.value)
+    alert('设置已保存！')
+  } catch (e) {
+    // 错误由 store.error 提供
   }
-};
+}
 
-onMounted(fetchSettings);
+onMounted(() => {
+  profileStore.fetchSettings().catch(() => {})
+})
 </script>
 
 <style scoped>

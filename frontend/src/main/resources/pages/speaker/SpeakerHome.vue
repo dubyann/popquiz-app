@@ -110,15 +110,22 @@
   </div>
 </template>
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { toRef, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-const router = useRouter()
-const lectures = ref<{id: number, title: string, desc: string, speaker: string, status: number}[]>([])
-const showCreate = ref(false)
-const showLectures = ref(false)
-const newLecture = ref({ title: '', desc: '', speaker: '' })
+import { useSpeakerStore } from '../../../../stores/speaker'
 
-// 状态处理函数
+// 使用 Pinia 的 speaker store 来集中管理讲者页面的状态与逻辑
+const router = useRouter()
+const speakerStore = useSpeakerStore()
+
+// 模板直接绑定 store 中的响应式引用
+const lectures = toRef(speakerStore, 'lectures')
+const showCreate = toRef(speakerStore, 'showCreate')
+const showLectures = toRef(speakerStore, 'showLectures')
+const newLecture = toRef(speakerStore, 'newLecture')
+const isLoading = toRef(speakerStore, 'isLoading')
+
+// 辅助函数（保留原有文案）
 const getStatusText = (status: number) => {
   switch (status) {
     case 0: return '未开始'
@@ -137,163 +144,46 @@ const getStatusClass = (status: number) => {
   }
 }
 
+// 页面事件：调用 store 的方法
 function toggleLectures() {
-  showLectures.value = !showLectures.value
-  if (showLectures.value && lectures.value.length === 0) {
-    fetchLectures()
-  }
+  speakerStore.toggleLectures()
 }
-
-async function fetchLectures() {
-  try {
-    const token = sessionStorage.getItem('token')
-    const res = await fetch('/api/lectures/my', {
-      headers: { 'Authorization': `Bearer ${token}` }
-    })
-    if (res.ok) {
-      const data = await res.json()
-      lectures.value = data.map((item: any) => ({
-        id: item.id,
-        title: item.title,
-        desc: item.description ,
-        speaker: item.name || '',
-        status: item.status || 0
-      }))
-    }
-  } catch (e) {}
-}
-
-onMounted(() => {
-  // 默认不加载讲座列表
-})
 
 async function createLecture() {
-  console.log('createLecture 被触发', newLecture.value)
-  if (!newLecture.value.title || !newLecture.value.desc || !newLecture.value.speaker) {
-    alert('讲座标题、简介和主讲人姓名均为必填！')
-    console.log('表单未填全', newLecture.value)
-    return
-  }
-  const token = sessionStorage.getItem('token')
-  console.log('token', token)
-  if (!token) {
-    alert('请先登录！')
-    return
-  }
-  let payload: any = null
   try {
-    payload = JSON.parse(atob(token.split('.')[1]))
-  } catch (e) { console.log('token 解析失败', e) }
-  console.log('payload', payload)
-  if (!payload || payload.role !== 'speaker') {
-    alert('只有讲者可以创建讲座！')
-    return
-  }
-  try {
-    console.log('准备发起POST请求', {
-      title: newLecture.value.title,
-      description: newLecture.value.desc,
-      name: newLecture.value.speaker
-    })
-    const res = await fetch('/api/lectures/', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify({
-        title: newLecture.value.title,
-        description: newLecture.value.desc,
-        name: newLecture.value.speaker
-      })
-    })
-    const data = await res.json()
-    console.log('后端响应', res.status, data)
-    if (res.ok && data.lecture) {
-      showCreate.value = false
-      await fetchLectures()
-      router.push(`/speaker/lecture/${data.lecture.id}/upload`)
-      newLecture.value = { title: '', desc: '', speaker: '' }
-    } else {
-      alert(data.error || '创建失败')
-    }
-  } catch (e) {
-    alert('网络错误')
-    console.log('请求异常', e)
+    const id = await speakerStore.createLecture()
+    // 关闭模态并跳转到上传页面
+    speakerStore.setShowCreate(false)
+    if (id) router.push(`/speaker/lecture/${id}/upload`)
+  } catch (e: any) {
+    alert(e.message || '创建失败')
   }
 }
 
 async function deleteLecture(id: number) {
   if (!confirm('确定要删除该讲座吗？')) return
-  const token = sessionStorage.getItem('token')
   try {
-    const res = await fetch(`/api/lectures/${id}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${token}` }
-    })
-    const data = await res.json()
-    if (res.ok) {
-      await fetchLectures()
-    } else {
-      alert(data.error || '删除失败')
-    }
-  } catch (e) {
-    alert('网络错误')
+    await speakerStore.deleteLecture(id)
+  } catch (e: any) {
+    alert(e.message || '删除失败')
   }
 }
 
 async function restartLecture(id: number) {
-  console.log('尝试重新开始讲座:', id)
   if (!confirm('确定要重新开始这个讲座吗？\n\n重新开始后：\n• 讲座状态将变为"进行中"\n• 您可以继续管理题目和与听众互动\n• 之前的数据和统计不会丢失')) return
-  
-  const token = sessionStorage.getItem('token')
-  console.log('使用token:', token ? '已获取到token' : '未找到token')
-  
-  if (!token) {
-    alert('请先登录！')
-    return
-  }
-  
   try {
-    console.log('发起重新开始请求:', `/api/lectures/${id}/restart`)
-    const res = await fetch(`/api/lectures/${id}/restart`, {
-      method: 'POST',
-      headers: { 
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      }
-    })
-    console.log('响应状态:', res.status)
-    console.log('响应类型:', res.headers.get('content-type'))
-    
-    let data
-    try {
-      data = await res.json()
-      console.log('响应数据:', data)
-    } catch (parseError) {
-      console.error('解析响应数据失败:', parseError)
-      const text = await res.text()
-      console.log('原始响应:', text)
-      alert('服务器响应格式错误')
-      return
+    await speakerStore.restartLecture(id)
+    if (confirm('讲座已成功重新开始！\n\n是否现在就进入讲座管理页面？')) {
+      router.push(`/speaker/lecture/${id}/upload`)
     }
-    
-    if (res.ok) {
-      console.log('重新开始成功，刷新讲座列表')
-      await fetchLectures()
-      // 显示成功消息并提供选择
-      if (confirm('讲座已成功重新开始！\n\n是否现在就进入讲座管理页面？')) {
-        router.push(`/speaker/lecture/${id}/upload`)
-      }
-    } else {
-      console.error('重新开始失败:', data)
-      alert(data.error || '重新开始失败')
-    }
-  } catch (e) {
-    console.error('重新开始讲座异常:', e)
-    alert('网络错误，请检查网络连接后重试')
+  } catch (e: any) {
+    alert(e.message || '重新开始失败')
   }
 }
+
+onMounted(() => {
+  // 页面加载时不自动拉取，除非用户展开列表。
+})
 </script>
 <style scoped>
 .center-container {

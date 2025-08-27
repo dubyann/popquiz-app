@@ -1,6 +1,8 @@
 import { createApp } from 'vue'
 import App from './App.vue'
 import { createRouter, createWebHistory } from 'vue-router'
+import { createPinia } from 'pinia'
+import { useAuthStore } from './stores/auth'
 
 // 页面组件导入
 import Login from './main/resources/pages/Login.vue'
@@ -88,20 +90,31 @@ const router = createRouter({
 
 // 路由守卫 - 防止已登录用户访问登录页，未登录用户访问需要认证的页面
 router.beforeEach((to, from, next) => {
-  // 使用sessionStorage代替localStorage，确保关闭浏览器标签页后自动清除登录状态
-  const token = sessionStorage.getItem('token')
+  // 使用 Pinia 管理的认证状态
+  // 因为 router.beforeEach 在应用启动时就会执行，使用直接读取 sessionStorage 作为兜底方案
+  // 若 Pinia 可用，prefer 使用 store
+  let token = sessionStorage.getItem('token')
+  try {
+    // 尝试从 store（已挂载）读取
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    
+    const auth = useAuthStore()
+    if (auth && auth.token) {
+      token = auth.token
+    }
+  } catch (e) {
+    // ignore - 在某些启动阶段 require 可能失败，继续使用 sessionStorage
+  }
+
   const isLoggedIn = !!token
-  
-  // 需要认证的路径
   const protectedPaths = ['/speaker', '/listener', '/organizer']
   const isProtectedPath = protectedPaths.some(path => to.path.startsWith(path))
-  
-  // 处理根路径 - 如果已登录，重定向到对应首页
+
   if (to.path === '/' && isLoggedIn) {
     try {
-      const payload = JSON.parse(atob(token.split('.')[1]))
+      const payload = JSON.parse(atob((token as string).split('.')[1]))
       const userRole = payload.role
-      
+
       if (userRole === 'speaker') {
         next('/speaker/home')
       } else if (userRole === 'listener') {
@@ -110,19 +123,17 @@ router.beforeEach((to, from, next) => {
         next('/login')
       }
     } catch (e) {
-      // token无效，清除并重定向到登录页
       sessionStorage.removeItem('token')
       next('/login')
     }
     return
   }
-  
-  // 如果用户已登录且试图访问登录或注册页面，重定向到对应首页
+
   if (isLoggedIn && (to.path === '/login' || to.path === '/register')) {
     try {
-      const payload = JSON.parse(atob(token.split('.')[1]))
+      const payload = JSON.parse(atob((token as string).split('.')[1]))
       const userRole = payload.role
-      
+
       if (userRole === 'speaker') {
         next('/speaker/home')
       } else if (userRole === 'listener') {
@@ -131,28 +142,21 @@ router.beforeEach((to, from, next) => {
         next('/login')
       }
     } catch (e) {
-      // token无效，清除并重定向到登录页
       sessionStorage.removeItem('token')
       next('/login')
     }
-  } 
-  // 如果用户未登录且试图访问需要认证的页面，重定向到登录页
-  else if (!isLoggedIn && isProtectedPath) {
+  } else if (!isLoggedIn && isProtectedPath) {
     next('/login')
-  } 
-  // 如果用户已登录且试图访问需要认证的页面，检查角色权限
-  else if (isLoggedIn && isProtectedPath) {
+  } else if (isLoggedIn && isProtectedPath) {
     try {
-      const payload = JSON.parse(atob(token.split('.')[1]))
+      const payload = JSON.parse(atob((token as string).split('.')[1]))
       const userRole = payload.role
-      
-      // 检查用户是否有权限访问该路径
+
       if (to.path.startsWith('/speaker') && userRole !== 'speaker') {
         next('/listener/home')
       } else if (to.path.startsWith('/listener') && userRole !== 'listener') {
         next('/speaker/home')
       } else if (to.path.startsWith('/organizer') && userRole !== 'organizer') {
-        // 如果用户不是organizer，根据角色重定向
         if (userRole === 'speaker') {
           next('/speaker/home')
         } else if (userRole === 'listener') {
@@ -164,7 +168,6 @@ router.beforeEach((to, from, next) => {
         next()
       }
     } catch (e) {
-      // token无效，清除并重定向到登录页
       sessionStorage.removeItem('token')
       next('/login')
     }
@@ -173,4 +176,10 @@ router.beforeEach((to, from, next) => {
   }
 })
 
-createApp(App).use(router).mount('#app')
+const app = createApp(App)
+const pinia = createPinia()
+
+app.use(pinia)
+app.use(router)
+
+app.mount('#app')

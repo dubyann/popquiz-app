@@ -22,10 +22,10 @@
         <p class="message-text">{{ successMessage }}</p>
       </div>
       
-      <form @submit.prevent="handleRegister">
+  <form @submit.prevent="handleRegister">
         <div class="input-group">
           <input 
-            v-model="username" 
+            v-model="registerUsername" 
             placeholder="用户名" 
             required 
             class="input"
@@ -33,6 +33,19 @@
             @input="clearFieldError('username')"
           />
           <span v-if="errors.username" class="field-error">{{ errors.username }}</span>
+        </div>
+
+        <!-- 联系方式：邮箱或手机号（单一输入） -->
+        <div class="input-group">
+          <input
+            v-model="contact"
+            placeholder="邮箱/手机号"
+            required
+            class="input"
+            :class="{ 'input-error': errors.contact }"
+            @input="clearFieldError('contact')"
+          />
+          <span v-if="errors.contact" class="field-error">{{ errors.contact }}</span>
         </div>
         
         <div class="input-group">
@@ -63,7 +76,7 @@
         
         <div class="input-group">
           <select 
-            v-model="role" 
+            v-model="regRole" 
             required 
             class="input"
             :class="{ 'input-error': errors.role }"
@@ -80,12 +93,27 @@
         <button 
           type="submit" 
           class="btn" 
-          :disabled="isLoading || !isFormValid"
-          :class="{ 'btn-loading': isLoading }"
+          :disabled="isRegistering || !isFormValid"
+          :class="{ 'btn-loading': isRegistering }"
         >
-          <span v-if="isLoading" class="loading-spinner">🔄</span>
-          {{ isLoading ? '注册中...' : '注册' }}
+          <span v-if="isRegistering" class="loading-spinner">🔄</span>
+          {{ isRegistering ? '注册中...' : '注册' }}
         </button>
+
+        <!-- 数字验证码区域 -->
+        <div class="captcha-area" v-if="captchaToken">
+          <div class="captcha-instructions">请输入图片中的四位数字验证码</div>
+          <div class="captcha-image">
+            <!-- 当 lastCaptchaSvgText 包含 <svg> 标记时，使用 v-html 内联；否则尝试使用图片 src -->
+            <div class="captcha-inline" v-if="captchaHtmlPresent" v-html="lastCaptchaSvgText"></div>
+            <img v-else-if="captchaImage" :src="captchaImage" alt="captcha" />
+            <div v-else class="captcha-inline">验证码加载中</div>
+            <button type="button" class="btn" @click="refreshCaptcha">刷新</button>
+          </div>
+          <div class="input-group">
+            <input v-model="captchaInput" placeholder="输入验证码" class="input" maxlength="4" />
+          </div>
+        </div>
         
         <p class="login-tip">
           已有账号？<router-link to="/login">登录</router-link>
@@ -96,211 +124,123 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { formatErrorMessage } from '../../../utils/errorHandler'
 import { useRouter } from 'vue-router'
-import axios from 'axios'
+import { useAuthStore } from '../../../stores/auth'
+import { storeToRefs } from 'pinia'
+import { onBeforeRouteLeave } from 'vue-router'
 
-const username = ref('')
+// 将密码放在组件本地，减小泄露风险
 const password = ref('')
 const confirmPassword = ref('')
-const role = ref('')
-const router = useRouter()
 
-// 状态管理
-const isLoading = ref(false)
-const errorMessage = ref('')
-const successMessage = ref('')
-const errors = ref({
-  username: '',
-  password: '',
-  confirmPassword: '',
-  role: ''
-})
+const router = useRouter()
+const auth = useAuthStore()
+
+// 从 Pinia 获取表单与 captcha 状态
+const { captchaToken, lastCaptchaSvg, lastCaptchaSvgText,
+  registerUsername, regRole, contact, captchaInput,
+  errors, errorMessage, successMessage, isRegistering
+} = storeToRefs(auth)
+
+// 清理敏感字段函数（供路由离开及页面失焦/隐藏时调用）
+function clearSensitive() {
+  password.value = ''
+  confirmPassword.value = ''
+  try { clearFieldError('password') } catch (e) { }
+  try { clearFieldError('confirmPassword') } catch (e) { }
+}
+
+// functions
+const { fetchCaptcha, refreshCaptcha, submitRegister, clearFieldError, clearMessages } = auth
 
 // 表单验证
 const isFormValid = computed(() => {
-  return username.value.trim() && 
+  return registerUsername.value.trim() && 
          password.value.trim() && 
          confirmPassword.value.trim() &&
-         role.value && 
+         regRole.value && 
+         contact.value.trim() &&
          !Object.values(errors.value).some(error => error)
 })
 
-// 清除字段错误
-const clearFieldError = (field: string) => {
-  errors.value[field] = ''
-  if (errorMessage.value) {
-    errorMessage.value = ''
+// captchaInput 已由 Pinia 管理
+
+// 判断是否为可用的 HTML <svg> 文本（用于 v-html）
+const captchaHtmlPresent = computed(() => {
+  const txt = lastCaptchaSvgText.value || ''
+  return /<svg[\s>]/i.test(txt)
+})
+
+// captchaImage 从 store 的 captchaToken 或 svg 字段来显示
+const captchaImage = computed(() => {
+  // 如果后端直接返回 data-url 或我们已构造好 data-url，则使用它
+  if (lastCaptchaSvg.value && /^data:image\/.+/.test(lastCaptchaSvg.value)) return lastCaptchaSvg.value
+  // 否则，如果后端返回的是原始 svgText，但不是 HTML（rare），把它编码为 data-url
+  if (lastCaptchaSvgText.value && !captchaHtmlPresent.value) {
+    try {
+      return 'data:image/svg+xml;utf8,' + encodeURIComponent(lastCaptchaSvgText.value)
+    } catch (e) {
+      return ''
+    }
   }
-}
+  return ''
+})
 
-// 清除所有提示信息
-const clearMessages = () => {
-  errorMessage.value = ''
-  successMessage.value = ''
-  errors.value = {
-    username: '',
-    password: '',
-    confirmPassword: '',
-    role: ''
-  }
-}
+// 清除错误字段信息
+// clearFieldError / clearMessages 已由 Pinia 提供
 
-// 表单验证
-const validateForm = () => {
-  clearMessages()
-  let isValid = true
-
-  // 用户名验证
-  if (!username.value.trim()) {
-    errors.value.username = '请输入用户名'
-    isValid = false
-  } else if (username.value.trim().length < 2) {
-    errors.value.username = '用户名至少需要2个字符'
-    isValid = false
-  } else if (username.value.trim().length > 20) {
-    errors.value.username = '用户名不能超过20个字符'
-    isValid = false
-  } else if (!/^[a-zA-Z0-9_\u4e00-\u9fa5]+$/.test(username.value.trim())) {
-    errors.value.username = '用户名只能包含字母、数字、下划线和中文'
-    isValid = false
-  }
-
-  // 密码验证
-  if (!password.value) {
-    errors.value.password = '请输入密码'
-    isValid = false
-  } else if (password.value.length < 6) {
-    errors.value.password = '密码至少需要6个字符'
-    isValid = false
-  } else if (password.value.length > 50) {
-    errors.value.password = '密码不能超过50个字符'
-    isValid = false
-  } else if (!/^(?=.*[a-zA-Z0-9])/.test(password.value)) {
-    errors.value.password = '密码必须包含至少一个字母或数字'
-    isValid = false
-  }
-
-  // 确认密码验证
-  if (!confirmPassword.value) {
-    errors.value.confirmPassword = '请确认密码'
-    isValid = false
-  } else if (password.value !== confirmPassword.value) {
-    errors.value.confirmPassword = '两次输入的密码不一致'
-    isValid = false
-  }
-
-  // 角色验证
-  if (!role.value) {
-    errors.value.role = '请选择用户角色'
-    isValid = false
-  } else if (!['listener', 'speaker', 'organizer'].includes(role.value)) {
-    errors.value.role = '请选择有效的用户角色'
-    isValid = false
-  }
-
-  return isValid
-}
+// 表单验证 由 Pinia store 的 validateFormLocal/submitRegister 管理
 
 // 错误处理函数
-const handleError = (error: any) => {
+const handleError = (error: unknown) => {
   console.error('注册错误:', error)
-  
-  if (error.response) {
-    // 服务器返回错误响应
-    const status = error.response.status
-    const data = error.response.data
-    
-    switch (status) {
-      case 400:
-        if (data.error?.includes('用户名')) {
-          errorMessage.value = '用户名格式不正确，请使用2-20个字符的字母、数字、下划线或中文'
-        } else if (data.error?.includes('密码')) {
-          errorMessage.value = '密码格式不正确，请使用6-20个字符'
-        } else if (data.error?.includes('角色')) {
-          errorMessage.value = '请选择有效的用户角色'
-        } else {
-          errorMessage.value = data.error || '请求参数错误，请检查输入内容'
-        }
-        break
-      case 409:
-        errorMessage.value = '用户名已被注册，请选择其他用户名'
-        break
-      case 422:
-        errorMessage.value = '输入数据验证失败，请检查：\n• 用户名：2-20个字符，仅支持字母、数字、下划线、中文\n• 密码：6-20个字符\n• 角色：必须选择听众、演讲者或组织者'
-        break
-      case 429:
-        errorMessage.value = '注册请求过于频繁，请稍后再试'
-        break
-      case 500:
-        errorMessage.value = '服务器内部错误，请稍后重试或联系技术支持'
-        break
-      case 502:
-        errorMessage.value = '服务器网关错误，请稍后重试'
-        break
-      case 503:
-        errorMessage.value = '服务暂时不可用，请稍后重试'
-        break
-      default:
-        errorMessage.value = data.error || `注册失败 (错误代码: ${status})，请稍后重试`
-    }
-  } else if (error.request) {
-    // 网络错误
-    if (error.code === 'ERR_NETWORK' || error.message.includes('Network Error')) {
-      errorMessage.value = '无法连接到服务器，请检查：\n1. 网络连接是否正常\n2. 后端服务是否启动 (端口: 3001)\n3. 防火墙是否阻止连接'
-    } else if (error.code === 'ECONNREFUSED') {
-      errorMessage.value = '服务器拒绝连接，请确认后端服务已启动'
-    } else {
-      errorMessage.value = '网络请求超时或失败，请检查网络连接'
-    }
-  } else {
-    // 其他错误
-    errorMessage.value = '注册过程中出现未知错误，请刷新页面后重试'
-  }
+  errorMessage.value = formatErrorMessage(error)
 }
 
 const handleRegister = async () => {
-  // 表单验证
-  if (!validateForm()) {
-    return
-  }
-
-  isLoading.value = true
-  clearMessages()
-
   try {
-    console.log('正在注册...', { 用户名: username.value, 角色: role.value })
-    
-    const res = await axios.post('/api/auth/register', {
-      username: username.value.trim(),
-      password: password.value,
-      role: role.value
-    })
-    
-    console.log('注册响应:', res.data)
-    
-    if (res.data.message === '注册成功！') {
-      // 注册成功
-      const roleText = role.value === 'listener' ? '听众' : 
-                      role.value === 'speaker' ? '演讲者' : '组织者'
-      successMessage.value = `恭喜您成功注册为${roleText}！\n账户名：${username.value.trim()}\n\n2秒后自动跳转到登录页面...`
-      
-      // 延迟跳转，让用户看到成功提示
-      setTimeout(() => {
-        router.push('/login')
-      }, 2000)
-      
-    } else {
-      // 注册失败但有响应
-      errorMessage.value = res.data.error || '注册失败，请检查输入信息是否正确'
+  const result = await submitRegister(password.value, confirmPassword.value)
+    if (result && result.ok) {
+      // 注册成功，跳转到登录
+      setTimeout(() => router.push('/login'), 2000)
+      return
     }
-    
-  } catch (error) {
-    handleError(error)
-  } finally {
-    isLoading.value = false
+
+    // submitRegister 返回非 ok 的情况，统一交给 handleError 处理（后端可能返回对象或 axios 错误结构）
+    if (result && result.data) {
+      handleError(result.data)
+    } else {
+      handleError(new Error('注册失败'))
+    }
+  } catch (err) {
+    // 捕获 submitRegister 抛出的异常并交由统一错误处理函数处理
+    handleError(err)
   }
 }
+
+// 路由离开时清理
+onBeforeRouteLeave((to, from, next) => {
+  clearSensitive()
+  next()
+})
+
+// 页面隐藏/失焦时清理
+onMounted(() => {
+  const onVisibility = () => { if (document.hidden) clearSensitive() }
+  const onBlur = () => clearSensitive()
+  window.addEventListener('visibilitychange', onVisibility)
+  window.addEventListener('blur', onBlur)
+  onUnmounted(() => {
+    window.removeEventListener('visibilitychange', onVisibility)
+    window.removeEventListener('blur', onBlur)
+  })
+})
+
+onMounted(() => {
+  fetchCaptcha()
+})
 </script>
 
 <style scoped>
@@ -514,6 +454,54 @@ h2 {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* Captcha SVG styling (all styling lives in frontend) */
+.captcha-image {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.captcha-inline {
+  display: inline-block;
+  width: 140px;
+  height: 48px;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+  background: transparent;
+}
+
+/* Use deep selector so scoped styles reach v-html-inserted SVG */
+.captcha-inline ::v-deep svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.captcha-inline ::v-deep text {
+  font-family: 'Segoe UI', Roboto, system-ui, Arial, Helvetica, sans-serif;
+  font-weight: 700;
+  letter-spacing: 2px;
+  dominant-baseline: middle;
+}
+.captcha-inline ::v-deep line {
+  mix-blend-mode: multiply;
+}
+
+/* tweak fills/strokes via CSS variables for easy theming */
+.captcha-inline {
+  --captcha-fill: #0b5ed7;
+  --captcha-stroke: rgba(0,0,0,0.08);
+}
+.captcha-inline ::v-deep text {
+  fill: var(--captcha-fill) !important;
+  stroke: var(--captcha-stroke);
+  stroke-width: 0.4px;
+}
+
+/* small screens */
+@media (max-width: 480px) {
+  .captcha-inline { width: 120px; height: 42px; }
 }
 
 /* 响应式设计 */

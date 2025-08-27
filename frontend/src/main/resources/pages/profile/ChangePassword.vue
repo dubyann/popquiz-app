@@ -23,38 +23,35 @@
   </div>
 </template>
 
-<script setup>
-import { ref } from 'vue';
-import axios from 'axios';
+<script setup lang="ts">
+import { ref } from 'vue'
+import { useProfileStore } from '../../../../stores/profile'
 
-const passwords = ref({
-  current: '',
-  new: '',
-  confirm: ''
-});
-const loading = ref(false);
-const error = ref(null);
+const profileStore = useProfileStore()
+const passwords = ref({ current: '', new: '', confirm: '' })
+const loading = ref(false)
+const error = ref<string | null>(null)
 
 const submitPassword = async () => {
   if (passwords.value.new !== passwords.value.confirm) {
-    error.value = '新密码和确认密码不一致！';
-    return;
+    error.value = '新密码和确认密码不一致！'
+    return
   }
 
-  loading.value = true;
-  error.value = null;
+  loading.value = true
+  error.value = null
   try {
-    await axios.put('/api/password', {
-      currentPassword: passwords.value.current,
-      newPassword: passwords.value.new
-    });
-    alert('密码已修改！');
+    await profileStore.changePassword(passwords.value.current, passwords.value.new)
+    alert('密码已修改！')
+    passwords.value.current = ''
+    passwords.value.new = ''
+    passwords.value.confirm = ''
   } catch (err) {
-    error.value = '修改密码失败，请检查当前密码是否正确';
+    error.value = profileStore.error || '修改密码失败，请检查当前密码是否正确'
   } finally {
-    loading.value = false;
+    loading.value = false
   }
-};
+}
 </script>
 
 <style scoped>

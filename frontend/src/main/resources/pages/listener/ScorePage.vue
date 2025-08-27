@@ -218,15 +218,17 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { AuthManager } from '../../../../utils/auth'
+import { useListenerStore } from '../../../../stores/listener'
 
-// 响应式数据
-const loading = ref(true)
+// 响应式数据（大部分由 listener store 提供）
+const listenerStore = useListenerStore()
+const loading = listenerStore.scoreLoading
 const error = ref('')
-const lectureStats = ref<any>({})
-const groupStats = ref<any[]>([])
-const leaderboard = ref<any[]>([])
-const myAnswers = ref<any[]>([])
-const myStats = ref<any>({})
+const lectureStats = listenerStore.lectureStats
+const groupStats = listenerStore.groupStats
+const leaderboard = listenerStore.leaderboard
+const myAnswers = listenerStore.myAnswers
+const myStats = listenerStore.myStats
 const currentUserId = ref<number | null>(null)
 
 // 弹窗状态
@@ -244,9 +246,9 @@ const overallAccuracy = computed(() => {
     return 0
   }
   // 兜底用myAnswers
-  if (!Array.isArray(myAnswers.value) || myAnswers.value.length === 0) return 0
-  const correct = myAnswers.value.filter(answer => answer.is_correct).length
-  return Math.round((correct / myAnswers.value.length) * 100)
+  if (!Array.isArray(myAnswers) || myAnswers.length === 0) return 0
+  const correct = myAnswers.filter(answer => answer.is_correct).length
+  return Math.round((correct / myAnswers.length) * 100)
 })
 
 const completionRate = computed(() => {
@@ -257,7 +259,7 @@ const completionRate = computed(() => {
     return Math.round((myStats.value.total_questions / totalQuestionsCount) * 100)
   }
   // 兜底用myAnswers
-  const answeredQuestionsCount = Array.isArray(myAnswers.value) ? myAnswers.value.length : 0
+  const answeredQuestionsCount = Array.isArray(myAnswers) ? myAnswers.length : 0
   return Math.round((answeredQuestionsCount / totalQuestionsCount) * 100)
 })
 
@@ -265,24 +267,24 @@ const totalCorrect = computed(() => {
   if (myStats.value && typeof myStats.value.correct_answers !== 'undefined') {
     return Number(myStats.value.correct_answers) || 0
   }
-  if (!Array.isArray(myAnswers.value)) return 0
-  return myAnswers.value.filter(answer => answer.is_correct).length
+  if (!Array.isArray(myAnswers)) return 0
+  return myAnswers.filter(answer => answer.is_correct).length
 })
 
 const totalAnswers = computed(() => {
   if (myStats.value && typeof myStats.value.total_questions !== 'undefined') {
     return Number(myStats.value.total_questions) || 0
   }
-  if (!Array.isArray(myAnswers.value)) return 0
-  return myAnswers.value.length
+  if (!Array.isArray(myAnswers)) return 0
+  return myAnswers.length
 })
 
 const answeredQuestions = computed(() => {
   if (myStats.value && typeof myStats.value.total_questions !== 'undefined') {
     return Number(myStats.value.total_questions) || 0
   }
-  if (!Array.isArray(myAnswers.value)) return 0
-  return myAnswers.value.length
+  if (!Array.isArray(myAnswers)) return 0
+  return myAnswers.length
 })
 
 const totalQuestions = computed(() => {
@@ -296,12 +298,12 @@ const totalQuestions = computed(() => {
 
 // 获取我在排行榜中的排名
 const myRank = computed(() => {
-  if (!currentUserId.value || !Array.isArray(leaderboard.value) || leaderboard.value.length === 0) {
+  if (!currentUserId.value || !Array.isArray(leaderboard) || leaderboard.length === 0) {
     return null
   }
   // 统一字符串比较
   const myIdStr = String(currentUserId.value)
-  const index = leaderboard.value.findIndex(user => {
+  const index = leaderboard.findIndex(user => {
     const userId = user.user_id || user.userId || user.id
     return String(userId) === myIdStr
   })
@@ -317,15 +319,14 @@ const myRankInfo = computed(() => {
   if (myStats.value && Object.keys(myStats.value).length > 0 && Number(myStats.value.total_questions) > 0) {
     return {
       user_id: currentUserId.value,
-      accuracy_rate: myStats.value.accuracy_rate || 0,
-      total_questions: myStats.value.total_questions || 0,
+  total_questions: myStats.value.total_questions || 0,
       correct_answers: myStats.value.correct_answers || 0
     }
   }
   // 兜底：排行榜查找
-  if (Array.isArray(leaderboard.value) && leaderboard.value.length > 0) {
+  if (Array.isArray(leaderboard) && leaderboard.length > 0) {
     const myIdStr = String(currentUserId.value)
-    const userInLeaderboard = leaderboard.value.find(user => {
+  const userInLeaderboard = leaderboard.find(user => {
       const userId = user.user_id || user.userId || user.id
       return String(userId) === myIdStr
     })
@@ -377,182 +378,24 @@ const getCurrentUserId = () => {
 
 // 获取成绩数据
 const fetchScoreData = async () => {
-  const lectureId = getCurrentLectureId()
-  console.log('=== ScorePage 调试信息 ===')
-  console.log('讲座ID:', lectureId)
-  
+  // 优先使用 store 中已预加载的 lectureDetail
+  let lectureId = listenerStore.lectureDetail?.id || getCurrentLectureId()
   if (!lectureId) {
     error.value = '未找到当前讲座信息'
-    loading.value = false
-    return
-  }
-
-  // 检查是否已登录且token有效
-  if (!AuthManager.isLoggedIn()) {
-    error.value = '登录已过期，请重新登录'
-    loading.value = false
-    // 可以考虑重定向到登录页面
-    // window.location.href = '/login'
-    return
-  }
-
-  const token = AuthManager.getToken()
-  console.log('Token存在:', !!token)
-  console.log('Token长度:', token?.length)
-  
-  if (!token) {
-    error.value = '请先登录'
-    loading.value = false
+    listenerStore.scoreLoading = false
     return
   }
 
   try {
-    loading.value = true
+    listenerStore.scoreLoading = true
     error.value = ''
-    
-    // 获取当前用户ID
     currentUserId.value = getCurrentUserId()
-    console.log('当前用户ID:', currentUserId.value)
-
-    // 设置请求超时
-    const timeout = 10000 // 10秒超时
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), timeout)
-
-    const headers = { 'Authorization': `Bearer ${token}` }
-    console.log('请求头:', headers)
-
-    // 构建API URLs
-    const statsUrl = `/api/answers/lecture/${lectureId}/stats`
-    const leaderboardUrl = `/api/answers/lecture/${lectureId}/leaderboard?limit=100`
-    const myAnswersUrl = `/api/answers/lecture/${lectureId}/my-answers`
-    
-    console.log('API URLs:', { statsUrl, leaderboardUrl, myAnswersUrl })
-
-    // 并行获取数据
-    const [statsResponse, leaderboardResponse, myAnswersResponse] = await Promise.all([
-      // 获取讲座统计
-      fetch(statsUrl, {
-        headers,
-        signal: controller.signal
-      }).catch(err => {
-        console.error('Stats API网络错误:', err)
-        return { ok: false, status: 'network_error', error: err }
-      }),
-      // 获取完整排行榜（用于确定排名）
-      fetch(leaderboardUrl, {
-        headers,
-        signal: controller.signal
-      }).catch(err => {
-        console.error('Leaderboard API网络错误:', err)
-        return { ok: false, status: 'network_error', error: err }
-      }),
-      // 获取我的答题记录
-      fetch(myAnswersUrl, {
-        headers,
-        signal: controller.signal
-      }).catch(err => {
-        console.error('My answers API网络错误:', err)
-        return { ok: false, status: 'network_error', error: err }
-      })
-    ])
-
-    clearTimeout(timeoutId)
-    console.log('API响应状态:', {
-      stats: statsResponse.ok ? 'OK' : `错误 ${statsResponse.status}`,
-      leaderboard: leaderboardResponse.ok ? 'OK' : `错误 ${leaderboardResponse.status}`,
-      myAnswers: myAnswersResponse.ok ? 'OK' : `错误 ${myAnswersResponse.status}`
-    })
-
-    // 检查是否有401错误（token过期）
-    const hasAuthError = [statsResponse, leaderboardResponse, myAnswersResponse].some(
-      resp => resp.status === 401 || resp.status === 403
-    )
-    
-    if (hasAuthError) {
-      console.warn('检测到认证错误，清除认证信息')
-      AuthManager.clearAuth()
-      error.value = '登录已过期，请重新登录'
-      loading.value = false
-      return
-    }
-
-    // 处理统计数据
-    if (statsResponse.ok && 'json' in statsResponse) {
-      try {
-        const statsData = await statsResponse.json()
-        console.log('Stats数据:', statsData)
-        if (statsData.success) {
-          lectureStats.value = statsData.data.lectureStats
-          groupStats.value = statsData.data.groupStats || []
-          console.log('[ScorePage] 赋值后 lectureStats.value:', lectureStats.value)
-        }
-      } catch (parseError) {
-        console.error('Stats数据解析失败:', parseError)
-      }
-    } else {
-      console.warn('Stats API失败:', statsResponse)
-    }
-
-    // 处理排行榜数据
-    if (leaderboardResponse.ok && 'json' in leaderboardResponse) {
-      try {
-        const leaderboardData = await leaderboardResponse.json()
-        console.log('Leaderboard数据:', leaderboardData)
-        if (leaderboardData.success) {
-          leaderboard.value = leaderboardData.data || []
-        }
-      } catch (parseError) {
-        console.error('Leaderboard数据解析失败:', parseError)
-      }
-    } else {
-      console.warn('Leaderboard API失败:', leaderboardResponse)
-    }
-
-    // 处理个人答题数据
-    if (myAnswersResponse.ok && 'json' in myAnswersResponse) {
-      try {
-        const myAnswersData = await myAnswersResponse.json()
-        console.log('My answers数据:', myAnswersData)
-        if (myAnswersData.success) {
-          myAnswers.value = myAnswersData.data.answers || []
-          myStats.value = myAnswersData.data.stats || {}
-        }
-      } catch (parseError) {
-        console.error('My answers数据解析失败:', parseError)
-      }
-    } else {
-      console.warn('My answers API失败:', myAnswersResponse)
-    }
-
-    // 如果所有API都失败了，显示错误
-    if (!statsResponse.ok && !leaderboardResponse.ok && !myAnswersResponse.ok) {
-      error.value = '无法获取数据，请检查网络连接或稍后重试'
-      console.error('所有API都失败了')
-    }
-
+    await listenerStore.loadScoreData(String(lectureId))
   } catch (err: any) {
-    console.error('fetchScoreData异常:', err)
-    if (err.name === 'AbortError') {
-      error.value = '请求超时，请稍后重试'
-    } else {
-      error.value = err.message || '获取数据失败，请稍后重试'
-    }
-    console.log('=== ScorePage 数据调试 ===')
-    console.log('lectureStats:', lectureStats.value)
-    console.log('myStats:', myStats.value)
-    console.log('myAnswers:', myAnswers.value)
-    console.log('计算结果:')
-    console.log('- overallAccuracy:', overallAccuracy.value)
-    console.log('- completionRate:', completionRate.value)
-    console.log('- totalCorrect:', totalCorrect.value)
-    console.log('- totalAnswers:', totalAnswers.value)
-    console.log('- answeredQuestions:', answeredQuestions.value)
-    console.log('- totalQuestions:', totalQuestions.value)
-
+    console.error('fetchScoreData 异常:', err)
+    error.value = err?.message || '获取数据失败'
   } finally {
-    loading.value = false
-    console.log('=== fetchScoreData 完成 ===')
+    listenerStore.scoreLoading = false
   }
 }
 
@@ -617,7 +460,7 @@ const isCurrentUser = (user: any) => {
 
 // 强制停止加载（用于紧急情况）
 const forceStopLoading = () => {
-  loading.value = false
+  listenerStore.scoreLoading = false
 }
 
 // 组件挂载时获取数据

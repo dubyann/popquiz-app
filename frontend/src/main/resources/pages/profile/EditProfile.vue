@@ -17,43 +17,26 @@
   </div>
 </template>
 
-<script setup>
-import { ref, onMounted } from 'vue';
-import axios from 'axios';
+<script setup lang="ts">
+import { storeToRefs } from 'pinia'
+import { useProfileStore } from '../../../../stores/profile'
+import { onMounted } from 'vue'
 
-const profile = ref({
-  username: '',
-  email: ''
-});
-const loading = ref(false);
-const error = ref(null);
-
-const fetchProfile = async () => {
-  loading.value = true;
-  try {
-    const response = await axios.get('/api/profile');
-    profile.value = response.data;
-  } catch (err) {
-    error.value = '加载个人信息失败';
-  } finally {
-    loading.value = false;
-  }
-};
+const profileStore = useProfileStore()
+const { profile, loading, error } = storeToRefs(profileStore)
 
 const submitProfile = async () => {
-  loading.value = true;
-  error.value = null;
   try {
-    await axios.put('/api/profile', profile.value);
-    alert('个人信息已保存！');
-  } catch (err) {
-    error.value = '保存失败，请稍后重试';
-  } finally {
-    loading.value = false;
+    await profileStore.updateProfile(profile.value)
+    alert('个人信息已保存！')
+  } catch (e) {
+    // 错误由 store.error 提供
   }
-};
+}
 
-onMounted(fetchProfile);
+onMounted(() => {
+  profileStore.fetchProfile().catch(() => {})
+})
 </script>
 
 <style scoped>

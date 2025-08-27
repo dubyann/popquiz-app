@@ -235,7 +235,7 @@ const getAnswerLeaderboard = async (lectureId, limit = 10) => {
     `SELECT 
       uqs.user_id,
       u.username,
-      u.nickname,
+      u.username AS nickname,
       uqs.accuracy_rate,
       uqs.total_questions,
       uqs.correct_answers,

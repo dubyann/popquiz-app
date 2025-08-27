@@ -97,22 +97,23 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, Ref } from 'vue'
 import { useRoute } from 'vue-router'
-import axios from 'axios'
+import { useListenerStore } from '../../../../stores/listener'
 
 const route = useRoute()
 const lectureId = route.params.id
 
-const loading = ref(true)
-const comments = ref<any[]>([])
+const listenerStore = useListenerStore()
+const loading = listenerStore.discussionLoading
+const comments = listenerStore.comments
 const newComment = ref({ text: '' })
 const currentUser = ref<any>(null)
 const currentLecture = ref<any>(null)
 const isSubmitting = ref(false)
 
 // 轮询相关
-let pollInterval: NodeJS.Timeout | null = null
+let pollInterval: number | null = null
 const POLL_INTERVAL = 3000 // 3秒轮询一次
 
 // 获取当前用户信息
@@ -166,22 +167,13 @@ const getCurrentUser = () => {
   }
 }
 
-// 获取当前讲座信息
+// 获取当前讲座信息（使用 listener store 预加载）
 const getCurrentLecture = async () => {
   try {
-    const token = localStorage.getItem('token') || sessionStorage.getItem('token')
-    if (!token) return null
-    
-    const response = await axios.get(`/api/lectures/${lectureId}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-    
-    if (response.data && response.data.lecture) {
-      return response.data.lecture
-    }
-    return null
+    const data = await listenerStore.fetchLecture(String(lectureId))
+    return data || null
   } catch (error) {
-    console.error('获取讲座信息失败:', error)
+    console.error('getCurrentLecture error', error)
     return null
   }
 }
@@ -203,71 +195,26 @@ const isLectureEnded = computed(() => lectureStatus.value.ended)
 const isLectureUpcoming = computed(() => lectureStatus.value.upcoming)
 const isLectureActive = computed(() => lectureStatus.value.active)
 
-// 获取讨论消息
+// 获取讨论消息（委托给 listener store）
 const loadDiscussionMessages = async () => {
   try {
-    const token = localStorage.getItem('token') || sessionStorage.getItem('token')
-    if (!token) return
-    
-    const response = await axios.get(`/api/discussion/lecture/${lectureId}/messages`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-    
-    if (response.data && response.data.success && response.data.data && response.data.data.messages) {
-      comments.value = response.data.data.messages.map((msg: any) => ({
-        id: msg.id,
-        userName: msg.username || '匿名用户',
-        text: msg.message,
-        time: new Date(msg.created_at),
-        isAnnouncement: msg.message_type === 'announcement',
-        isPinned: msg.is_pinned || false,
-        likesCount: msg.like_count || 0,
-        isLikedByUser: msg.isLikedByUser || false,
-        userId: msg.user_id,
-        userRole: msg.user_role
-      })).sort((a: any, b: any) => {
-        // 置顶消息优先，然后按时间排序
-        if (a.isPinned && !b.isPinned) return -1
-        if (!a.isPinned && b.isPinned) return 1
-        return b.time.getTime() - a.time.getTime()
-      })
-    } else {
-      comments.value = []
-    }
+    await listenerStore.loadDiscussionMessages(String(lectureId))
   } catch (error) {
     console.error('加载讨论消息失败:', error)
   }
 }
 
-// 提交新的讨论消息
+// 提交新的讨论消息（委托给 listener store）
 const submitComment = async () => {
   if (!newComment.value.text.trim() || isSubmitting.value) return
-  
+
   isSubmitting.value = true
-  
   try {
-    const token = localStorage.getItem('token') || sessionStorage.getItem('token')
-    if (!token) {
-      console.error('未找到认证令牌')
-      return
-    }
-    
-    const response = await axios.post(`/api/discussion/lecture/${lectureId}/message`, {
-      message: newComment.value.text.trim()
-    }, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-    
-    if (response.data && response.data.success) {
-      newComment.value.text = ''
-      // 立即刷新消息列表
-      await loadDiscussionMessages()
-    }
+    await listenerStore.submitComment(String(lectureId), newComment.value.text.trim())
+    newComment.value.text = ''
+    // store.submitComment 会内部刷新消息列表
   } catch (error) {
     console.error('提交讨论消息失败:', error)
-    if (error.response) {
-      console.error('错误响应:', error.response.data)
-    }
   } finally {
     isSubmitting.value = false
   }
@@ -341,81 +288,46 @@ const isCurrentUserSpeaker = () => {
 // 点赞/取消点赞
 const toggleLike = async (comment: any) => {
   try {
-    const token = localStorage.getItem('token') || sessionStorage.getItem('token')
-    if (!token) {
-      console.error('未找到认证令牌')
-      return
-    }
-    
-    const response = await axios.post(`/api/discussion/message/${comment.id}/like`, {}, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-    
-    if (response.data && response.data.success) {
-      // 重新加载消息列表以更新点赞状态
-      await loadDiscussionMessages()
-    }
+    await listenerStore.likeComment(Number(comment.id), String(lectureId))
   } catch (error) {
-    console.error('点赞操作失败:', error)
+    console.error('toggleLike error', error)
   }
 }
 
 // 置顶/取消置顶（仅演讲者可操作）
 const togglePin = async (comment: any) => {
   try {
-    const token = localStorage.getItem('token') || sessionStorage.getItem('token')
-    if (!token) {
-      console.error('未找到认证令牌')
-      return
-    }
-    
-    const response = await axios.post(`/api/discussion/lecture/${lectureId}/message/${comment.id}/pin`, {}, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-    
-    if (response.data && response.data.success) {
-      // 重新加载消息列表以更新置顶状态
-      await loadDiscussionMessages()
-    }
+    await listenerStore.pinMessage(String(lectureId), Number(comment.id))
   } catch (error) {
-    console.error('置顶操作失败:', error)
+    console.error('togglePin error', error)
   }
 }
 
 // 删除消息（仅自己的消息）
 const deleteComment = async (comment: any) => {
   if (!confirm('确定要删除这条消息吗？')) return
-  
   try {
-    const token = localStorage.getItem('token') || sessionStorage.getItem('token')
-    if (!token) {
-      console.error('未找到认证令牌')
-      return
-    }
-    
-    const response = await axios.delete(`/api/discussion/lecture/${lectureId}/message/${comment.id}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-    
-    if (response.data && response.data.success) {
-      // 重新加载消息列表以移除已删除的消息
-      await loadDiscussionMessages()
-    }
+    await listenerStore.deleteMessage(String(lectureId), Number(comment.id))
   } catch (error) {
-    console.error('删除消息失败:', error)
+    console.error('deleteComment error', error)
   }
 }
 
 // 初始化数据
 const initializeData = async () => {
-  loading.value = true
+  listenerStore.discussionLoading = true
   
   try {
     // 获取用户信息
     currentUser.value = getCurrentUser()
     
-    // 获取讲座信息
-    currentLecture.value = await getCurrentLecture()
+    // 获取讲座信息（使用 listener store 预加载方法）
+    try {
+      const data = await listenerStore.fetchLecture(String(lectureId))
+      currentLecture.value = data || null
+    } catch (e) {
+      currentLecture.value = null
+    }
     
     // 加载讨论消息
     await loadDiscussionMessages()
@@ -427,7 +339,7 @@ const initializeData = async () => {
   } catch (error) {
     console.error('初始化数据失败:', error)
   } finally {
-    loading.value = false
+    listenerStore.discussionLoading = false
   }
 }
 

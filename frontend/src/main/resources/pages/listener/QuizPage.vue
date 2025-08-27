@@ -142,7 +142,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import axios from 'axios'
+import { useListenerStore } from '../../../../stores/listener'
 
 const route = useRoute()
 const router = useRouter()
@@ -176,9 +176,10 @@ interface QuestionResult {
 }
 
 // 响应式数据
+const listenerStore = useListenerStore()
 const quizGroups = ref<QuizGroup[]>([])
-const availableQuestions = ref<QuizQuestion[]>([])
-const userAnswers = ref<Map<number, QuestionResult>>(new Map())
+const availableQuestions = listenerStore.availableQuestions
+const userAnswers = listenerStore.userAnswers
 const currentQuestionIndex = ref<number>(0)
 const userAnswer = ref('')
 const showFeedback = ref(true)
@@ -190,17 +191,17 @@ let pollInterval: number | null = null
 const POLL_INTERVAL = 3000 // 3秒轮询一次
 
 // 计算属性
-const totalQuestions = computed(() => availableQuestions.value.length)
-const completedQuestions = computed(() => userAnswers.value.size)
+const totalQuestions = computed(() => availableQuestions.length)
+const completedQuestions = computed(() => userAnswers.size)
 const allQuestionsCompleted = computed(() => 
-  availableQuestions.value.length > 0 && 
+  availableQuestions.length > 0 && 
   completedQuestions.value >= totalQuestions.value
 )
 
 const currentQuestion = computed(() => {
-  if (availableQuestions.value.length === 0) return null
-  if (currentQuestionIndex.value >= availableQuestions.value.length) return null
-  return availableQuestions.value[currentQuestionIndex.value]
+  if (availableQuestions.length === 0) return null
+  if (currentQuestionIndex.value >= availableQuestions.length) return null
+  return availableQuestions[currentQuestionIndex.value]
 })
 
 // 获取当前讲座信息
@@ -209,30 +210,20 @@ const getCurrentLecture = async () => {
   if (!currentLectureId || currentLectureId !== lectureId) {
     return null
   }
-  
   try {
-    const token = localStorage.getItem('token') || sessionStorage.getItem('token')
-    if (!token) {
-      console.error('未找到认证令牌')
-      return null
-    }
-    
-    const response = await axios.get(`/api/lectures/${lectureId}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-    
-    const lectureData = response.data.lecture
+    const data = await listenerStore.fetchLecture(String(lectureId))
+    if (!data) return null
     return {
-      id: lectureData.id,
-      title: lectureData.title,
-      description: lectureData.description,
-      speaker: lectureData.name || '未知讲者',
-      createdAt: new Date(lectureData.created_at),
-      status: lectureData.status,
-      speakerId: lectureData.speaker_id
+      id: data.id,
+      title: data.title || data.name,
+      description: data.description || data.desc,
+      speaker: data.speaker || data.name || '未知讲者',
+      createdAt: data.created_at ? new Date(data.created_at) : new Date(),
+      status: data.status,
+      speakerId: data.speaker_id || data.speakerId
     }
   } catch (error) {
-    console.error('获取讲座信息时发生错误:', error)
+    console.error('getCurrentLecture error', error)
     return null
   }
 }
@@ -254,38 +245,14 @@ const isLectureEnded = computed(() => lectureStatus.value.ended)
 const isLectureUpcoming = computed(() => lectureStatus.value.upcoming)
 const isLectureActive = computed(() => lectureStatus.value.active)
 
-// 获取已发布的题目
+// 获取已发布的题目（通过 listener store 提供的方法）
 const fetchPublishedQuizzes = async () => {
   try {
-    const token = sessionStorage.getItem('token')
-    if (!token) return
-    
-    const response = await axios.get(`/api/quiz/lecture/${lectureId}/published`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-    
-    if (response.data && response.data.success && response.data.data) {
-      const quizzes = response.data.data.quizzes || []
-      
-      // 过滤已发布的题目
-      const publishedQuizzes = quizzes.filter((quiz: QuizQuestion) => quiz.published)
-      
-      // 更新可用题目列表（如果有新题目则追加）
-      const existingIds = new Set(availableQuestions.value.map(q => q.id))
-      const newQuizzes = publishedQuizzes.filter((quiz: QuizQuestion) => !existingIds.has(quiz.id))
-      
-      if (newQuizzes.length > 0) {
-        availableQuestions.value = [...availableQuestions.value, ...newQuizzes]
-        updateQuizGroups()
-        
-        // 如果当前索引超出范围，重置为0
-        if (currentQuestionIndex.value >= availableQuestions.value.length) {
-          currentQuestionIndex.value = 0
-        }
-        
-        // 加载当前题目的答案
-        loadCurrentQuestionAnswer()
-      }
+    const result = await listenerStore.fetchQuizPublished(String(lectureId))
+    if (result && result.added && result.added > 0) {
+      updateQuizGroups()
+      if (currentQuestionIndex.value >= availableQuestions.length) currentQuestionIndex.value = 0
+      loadCurrentQuestionAnswer()
     }
   } catch (error) {
     console.error('获取题目失败:', error)
@@ -296,7 +263,7 @@ const fetchPublishedQuizzes = async () => {
 const updateQuizGroups = () => {
   const groupMap = new Map<number, QuizQuestion[]>()
   
-  availableQuestions.value.forEach(question => {
+  availableQuestions.forEach(question => {
     // 确保group_id是数字类型
     const groupId = parseInt(question.group_id?.toString() || '1')
     if (!groupMap.has(groupId)) {
@@ -325,8 +292,8 @@ const loadCurrentQuestionAnswer = () => {
     userAnswer.value = ''
     return
   }
-  
-  const result = userAnswers.value.get(currentQuestion.value.id)
+
+  const result = userAnswers.get(currentQuestion.value.id)
   if (result) {
     userAnswer.value = result.userAnswer
   } else {
@@ -370,100 +337,14 @@ const fetchQuestions = async () => {
   }
 }
 
-// 加载用户答题记录
+// 加载用户答题记录（使用 store）
 const loadUserAnswers = async () => {
   try {
-    const token = sessionStorage.getItem('token')
-    if (!token) return
-    
-    console.log('加载用户答题记录，讲座ID:', lectureId)
-    
-    // 尝试多个API端点
-    let response: any = null
-    let answers: any[] = []
-    
-    try {
-      // 首先尝试 quiz 路由
-      response = await axios.get(`/api/quiz/lecture/${lectureId}/my-answers`, {
-        headers: { Authorization: `Bearer ${token}` }
-      })
-      console.log('Quiz API响应:', response?.data)
-    } catch (error1) {
-      console.log('Quiz API失败，尝试answers API:', error1.message)
-      try {
-        // 尝试 answers 路由
-        response = await axios.get(`/api/answers/lecture/${lectureId}/my-answers`, {
-          headers: { Authorization: `Bearer ${token}` }
-        })
-        console.log('Answers API响应:', response?.data)
-      } catch (error2) {
-        console.error('两个API都失败了:', error2.message)
-        return
-      }
-    }
-    
-    if (!response) return
-    
-    console.log('答题记录响应:', response.data)
-    
-    // 处理响应数据 - 支持多种格式
-    if (Array.isArray(response.data)) {
-      answers = response.data
-    } else if (response.data && response.data.success && response.data.data) {
-      answers = response.data.data.answers || response.data.data || []
-    } else if (response.data && Array.isArray(response.data.data)) {
-      answers = response.data.data
-    } else if (response.data && response.data.data) {
-      answers = [response.data.data]
-    }
-    
-    console.log('解析的答题记录:', answers)
-    console.log('答题记录数量:', answers.length)
-    
-    // 清空现有答题记录
-    userAnswers.value.clear()
-    
-    answers.forEach((answer: any, index: number) => {
-      console.log(`处理答题记录 ${index + 1}:`, answer)
-      
-      // 支持多种可能的字段名
-      const questionId = answer.quiz_id || answer.questionId || answer.id || answer.question_id
-      const userAnswerText = answer.selected_option || answer.user_answer || answer.answer || answer.userAnswer
-      const correctAnswerText = answer.correct_option || answer.correct_answer || answer.correctAnswer
-      const isCorrectFlag = answer.is_correct !== undefined ? answer.is_correct : (answer.isCorrect !== undefined ? answer.isCorrect : false)
-      const answeredTime = answer.answered_at || answer.submittedAt || answer.created_at || answer.createdAt
-      
-      if (questionId) {
-        const result = {
-          questionId: parseInt(questionId),
-          userAnswer: userAnswerText,
-          correctAnswer: correctAnswerText,
-          isCorrect: Boolean(isCorrectFlag),
-          answeredAt: new Date(answeredTime || Date.now())
-        }
-        
-        userAnswers.value.set(parseInt(questionId), result)
-        console.log(`已保存答题记录: 题目${questionId} -> 用户答案:${userAnswerText}, 正确:${isCorrectFlag}`)
-      } else {
-        console.warn('跳过无效的答题记录:', answer)
-      }
-    })
-    
-    console.log('用户答题记录加载完成，共', userAnswers.value.size, '条记录')
-    console.log('答题记录详情:', Array.from(userAnswers.value.entries()).map(([id, result]) => ({
-      questionId: id,
-      userAnswer: result.userAnswer,
-      isCorrect: result.isCorrect
-    })))
-    
-    // 重新加载当前题目的答案状态
+    await listenerStore.fetchMyAnswers(String(lectureId))
+    // store 已经把 userAnswers 更新为 Map
     loadCurrentQuestionAnswer()
-    
   } catch (error) {
     console.error('加载用户答题记录失败:', error)
-    if (error.response) {
-      console.error('错误响应:', error.response.data)
-    }
   }
 }
 
@@ -503,60 +384,19 @@ const goToNextQuestion = (currentQuestion?: QuizQuestion) => {
 
 const submitAnswer = async (question: QuizQuestion) => {
   if (!userAnswer.value) return
-  
   try {
-    const token = sessionStorage.getItem('token')
-    if (!token) return
-    
-    console.log('提交答案:', {
-      questionId: question.id,
-      answer: userAnswer.value,
-      correctAnswer: question.correct_option
-    })
-    
-    const response = await axios.post(`/api/quiz/${question.id}/answer`, {
-      answer: userAnswer.value
-    }, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-    
-    console.log('答题提交响应:', response.data)
-    
-    if (response.data && (response.data.success || response.data.message)) {
-      // 根据后端返回的结果来确定正确性
-      const isCorrect = response.data.isCorrect !== undefined ? response.data.isCorrect : false
-      
-      // 保存答题结果
-      const result: QuestionResult = {
-        questionId: question.id,
-        userAnswer: userAnswer.value,
-        correctAnswer: question.correct_option,
-        isCorrect: isCorrect,
-        answeredAt: new Date()
-      }
-      
-      userAnswers.value.set(question.id, result)
-      console.log('答题结果已保存:', result)
-      console.log('当前用户答题记录:', Array.from(userAnswers.value.entries()))
-      
-      // 显示反馈后自动跳转到下一题
-      setTimeout(() => {
-        if (currentQuestionIndex.value < totalQuestions.value - 1) {
-          goToNextQuestion()
-        }
-      }, 2000)
-    }
+    await listenerStore.submitAnswer(Number(question.id), { answer: userAnswer.value, lectureId: String(lectureId) })
+    loadCurrentQuestionAnswer()
+    // 显示反馈后自动跳转到下一题
+    setTimeout(() => { if (currentQuestionIndex.value < totalQuestions.value - 1) goToNextQuestion() }, 1200)
   } catch (error) {
     console.error('提交答案失败:', error)
-    if (error.response) {
-      console.error('错误响应:', error.response.data)
-    }
   }
 }
 
 // 辅助函数
 const isQuestionCompleted = (questionId: number) => {
-  const completed = userAnswers.value.has(questionId)
+  const completed = userAnswers.has(questionId)
   console.log(`题目 ${questionId} 完成状态:`, completed)
   return completed
 }
@@ -579,7 +419,7 @@ const getCorrectAnswer = (question: QuizQuestion) => {
   return `${correctLetter}. ${options[correctLetter] || question.correct_option}`
 }
 
-const getQuestionResult = (questionId: number) => userAnswers.value.get(questionId)
+const getQuestionResult = (questionId: number) => userAnswers.get(questionId)
 
 // 生命周期
 onMounted(() => {

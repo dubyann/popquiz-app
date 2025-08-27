@@ -119,7 +119,7 @@
     <!-- 简洁页脚 -->
     <footer class="app-footer">
       <div class="footer-container">
-        <small>© 2024 PQ PopQuiz Web. 保留所有权利.</small>
+        <small>© 2025 PopQuiz-app Web. 保留所有权利.</small>
       </div>
     </footer>
   </div>
@@ -128,6 +128,7 @@
 <script setup>
 import { useRoute, useRouter } from 'vue-router'
 import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
+import { useAuthStore } from './stores/auth'
 
 const route = useRoute()
 const router = useRouter()
@@ -175,27 +176,20 @@ const toggleLectureInfo = async () => {
       let onlineParticipantCount = 0
       try {
         const res = await fetch(`/api/participants/count/${lectureId}`, {
-          headers: {
-            'Content-Type': 'application/json'
-          }
+          headers: { 'Content-Type': 'application/json' }
         })
-        if (res.ok) {
-          const data = await res.json()
-          console.log('获取参与者数量数据:', data)
-          participantCount = data.total_participants !== undefined ? data.total_participants : 0
-          onlineParticipantCount = data.online_participants !== undefined ? data.online_participants : 0
-          console.log('处理后的参与者数量:', { participantCount, onlineParticipantCount })
+        // 使用兼容 helper 解析
+        const { isOk, parseResponseData } = await import('./utils/http')
+        if (isOk(res)) {
+          const data = await parseResponseData(res)
+          participantCount = data?.total_participants ?? 0
+          onlineParticipantCount = data?.online_participants ?? 0
         }
       } catch (e) {
         console.warn('获取参与者数量失败:', e)
       }
 
-      currentLectureData.value = {
-        ...lecture,
-        participants: participantCount,
-        onlineParticipants: onlineParticipantCount,
-        status: lecture.status // 确保最新状态
-      }
+      currentLectureData.value = { ...lecture, participants: participantCount, onlineParticipants: onlineParticipantCount, status: lecture.status }
     }
   }
 }
@@ -313,10 +307,13 @@ const handleBeforeUnload = (event) => {
 }
 
 // 获取用户角色
+const auth = useAuthStore()
 const getUserRole = () => {
-  const token = sessionStorage.getItem('token')
+  if (auth && auth.role) return auth.role
+  if (auth && auth.user && auth.user.role) return auth.user.role
+  // 兜底：尝试从 storage 读取
+  const token = sessionStorage.getItem('token') || localStorage.getItem('token')
   if (!token) return null
-  
   try {
     const payload = JSON.parse(atob(token.split('.')[1]))
     return payload.role
@@ -383,11 +380,11 @@ const handleEndLecture = async () => {
     isEndingLecture.value = true
     
     try {
-      const token = sessionStorage.getItem('token')
+      const token = (auth && auth.token) || sessionStorage.getItem('token') || localStorage.getItem('token')
       if (!token) {
         throw new Error('未找到认证令牌')
       }
-      
+
       // 调用结束讲座API
       const response = await fetch(`/api/lectures/${currentLecture.id}/end`, {
         method: 'POST',
@@ -442,20 +439,22 @@ const handleLogout = () => {
     
     // 移除历史记录守卫
     removeHistoryGuard()
-    
-    // 清除本地存储的认证信息 - 从两个存储中都清除
-    sessionStorage.removeItem('token')
-    localStorage.removeItem('token')
-    localStorage.removeItem('authToken')
-    localStorage.removeItem('user')
-    localStorage.removeItem('userRole')
-    localStorage.removeItem('currentLectureId')
-    
-    // 也清除 sessionStorage 中对应的数据
-    sessionStorage.removeItem('authToken')
-    sessionStorage.removeItem('user')
-    sessionStorage.removeItem('userRole')
-    sessionStorage.removeItem('currentLectureId')
+    // 清除 store 中的认证信息并同步清理 storage
+    try {
+      auth.clearAuth()
+    } catch (e) {
+      // 兜底：直接清理 storage
+      sessionStorage.removeItem('token')
+      localStorage.removeItem('token')
+      localStorage.removeItem('authToken')
+      localStorage.removeItem('user')
+      localStorage.removeItem('userRole')
+      localStorage.removeItem('currentLectureId')
+      sessionStorage.removeItem('authToken')
+      sessionStorage.removeItem('user')
+      sessionStorage.removeItem('userRole')
+      sessionStorage.removeItem('currentLectureId')
+    }
     
     // 彻底清除历史记录，使用 location.replace 确保无法后退
     window.location.replace('/login')
