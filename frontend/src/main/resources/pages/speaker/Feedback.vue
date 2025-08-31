@@ -112,7 +112,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import axios from 'axios'
+import api from '../../../../utils/api'
 
 interface Feedback {
   id: string | number
@@ -148,10 +148,8 @@ const fetchFeedbacks = async () => {
     console.log('Token存在:', !!token)
     console.log('Token来源:', localStorage.getItem('token') ? 'localStorage' : 'sessionStorage')
     
-    // 获取反馈列表
-    const res = await axios.get(`/api/feedback/lecture/${lectureId}/all`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
+  // 获取反馈列表
+  const res = await api.get(`/api/feedback/lecture/${lectureId}/all`)
     
     console.log('反馈API响应:', res.data)
     
@@ -183,9 +181,7 @@ const fetchStats = async () => {
     const token = localStorage.getItem('token') || sessionStorage.getItem('token')
     console.log('获取反馈统计 - 讲座ID:', lectureId)
     
-    const res = await axios.get(`/api/feedback/lecture/${lectureId}/stats`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
+  const res = await api.get(`/api/feedback/lecture/${lectureId}/stats`)
     
     console.log('统计API响应:', res.data)
     

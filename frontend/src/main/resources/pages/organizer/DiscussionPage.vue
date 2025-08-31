@@ -102,25 +102,21 @@
   </div>
 </template>
 <script setup lang="ts">
-
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, toRef } from 'vue'
 import { useRoute } from 'vue-router'
-import axios from 'axios'
+import { useOrganizerStore } from '../../../../stores/organizer'
 
 const route = useRoute()
 const lectureId = route.params.id
 
-// const questions = ref<any[]>([])
-// const currentIndex = ref(0)
-// const currentQuestion = computed(() => questions.value[currentIndex.value] || {})
+const organizerStore = useOrganizerStore()
+const comments = toRef(organizerStore, 'comments')
+const loading = toRef(organizerStore, 'commentsLoading')
 
-const comments = ref<any[]>([])
-const loading = ref(true)
 const newComment = ref('')
 const replyingTo = ref<number|null>(null)
 const replyContent = ref('')
 const user = ref<any>(JSON.parse(localStorage.getItem('user') || '{}'))
-const token = localStorage.getItem('token')
 
 function getRoleText(role: string) {
   if (role === 'organizer') return '组织者'
@@ -143,105 +139,46 @@ function canPin(comment: any) {
 function canDelete(comment: any) {
   return user.value && (user.value.role === 'organizer' || user.value.role === 'speaker' || user.value.id === comment.user_id)
 }
-async function toggleLike(comment: any) {
-  try {
-    await axios.post(`/api/discussion/message/${comment.id}/like`, {}, { headers: { Authorization: `Bearer ${token}` } })
-    await fetchComments()
-  } catch (e) {}
-}
-async function togglePin(comment: any) {
-  try {
-    await axios.post(`/api/discussion/lecture/${lectureId}/message/${comment.id}/pin`, {}, { headers: { Authorization: `Bearer ${token}` } })
-    await fetchComments()
-  } catch (e) {}
-}
+
 const deleteConfirmId = ref<number|null>(null)
 function confirmDelete(comment: any) {
   deleteConfirmId.value = comment.id
 }
-async function deleteComment(comment: any) {
-  try {
-    await axios.delete(`/api/discussion/lecture/${lectureId}/message/${comment.id}`, { headers: { Authorization: `Bearer ${token}` } })
-    deleteConfirmId.value = null
-    await fetchComments()
-  } catch (e) {}
+
+async function toggleLike(comment: any) {
+  await organizerStore.toggleLike(lectureId, comment.id)
 }
-// 获取评论
-async function fetchComments() {
-  loading.value = true
-  try {
-    const token = localStorage.getItem('token')
-    const res = await axios.get(`/api/discussion/lecture/${lectureId}/messages`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-    if (res.data && res.data.success && res.data.data && res.data.data.messages) {
-      comments.value = res.data.data.messages.map(item => ({
-        ...item,
-        user_id: item.user_id // 保证user_id字段存在
-      }))
-    } else {
-      comments.value = []
-    }
-  } catch (e) {
-    comments.value = []
-  }
-  loading.value = false
-  user.value = JSON.parse(localStorage.getItem('user') || '{}')
+async function togglePin(comment: any) {
+  await organizerStore.togglePin(lectureId, comment.id)
+}
+async function deleteComment(comment: any) {
+  await organizerStore.deleteComment(lectureId, comment.id)
+  deleteConfirmId.value = null
 }
 
 onMounted(() => {
   user.value = JSON.parse(localStorage.getItem('user') || '{}')
-  fetchComments()
+  organizerStore.fetchComments(lectureId)
 })
 
-// 发布评论
 async function addComment() {
   if (!newComment.value.trim()) return
-  try {
-    const token = localStorage.getItem('token')
-    await axios.post(`/api/discussion/lecture/${lectureId}/message`, {
-      message: newComment.value,
-      messageType: 'text'
-    }, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-    await fetchComments()
-    newComment.value = ''
-  } catch (e) {}
+  await organizerStore.addComment(lectureId, newComment.value, 'text')
+  newComment.value = ''
 }
-// 回复评论
+
 async function sendReply(comment: any) {
   if (!replyContent.value.trim()) return
-  try {
-    const token = localStorage.getItem('token')
-    await axios.post(`/api/discussion/lecture/${lectureId}/message`, {
-      message: replyContent.value,
-      messageType: 'text',
-      parentId: comment.id
-    }, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-    await fetchComments()
-    replyContent.value = ''
-    replyingTo.value = null
-  } catch (e) {}
+  await organizerStore.sendReply(lectureId, comment.id, replyContent.value)
+  replyContent.value = ''
+  replyingTo.value = null
 }
+
 function replyTo(comment: any) {
   replyingTo.value = comment.id
   replyContent.value = ''
-
 }
-// 注释掉题目切换相关
-// function nextQuestion() {
-//   if (currentIndex.value < questions.value.length - 1) currentIndex.value++
-//   replyingTo.value = null
-//   replyContent.value = ''
-// }
-// function prevQuestion() {
-//   if (currentIndex.value > 0) currentIndex.value--
-//   replyingTo.value = null
-//   replyContent.value = ''
-// }
+
 </script>
 <style scoped>
 

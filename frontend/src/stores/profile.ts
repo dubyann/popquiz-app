@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import axios from 'axios'
+import api from '../utils/api'
 
 export const useProfileStore = defineStore('profile', () => {
   const profile = ref<any>({ username: '', email: '' })
@@ -12,7 +12,7 @@ export const useProfileStore = defineStore('profile', () => {
     loading.value = true
     error.value = null
     try {
-      const res = await axios.get('/api/profile')
+  const res = await api.get('/api/profile')
       profile.value = res.data
       return res.data
     } catch (e: any) {
@@ -27,7 +27,7 @@ export const useProfileStore = defineStore('profile', () => {
     loading.value = true
     error.value = null
     try {
-      const res = await axios.put('/api/profile', payload)
+  const res = await api.put('/api/profile', payload)
       profile.value = payload
       return res.data
     } catch (e: any) {
@@ -42,7 +42,7 @@ export const useProfileStore = defineStore('profile', () => {
     loading.value = true
     error.value = null
     try {
-      const res = await axios.get('/api/settings')
+  const res = await api.get('/api/settings')
       settings.value = res.data
       return res.data
     } catch (e: any) {
@@ -57,7 +57,7 @@ export const useProfileStore = defineStore('profile', () => {
     loading.value = true
     error.value = null
     try {
-      const res = await axios.put('/api/settings', payload)
+  const res = await api.put('/api/settings', payload)
       settings.value = payload
       return res.data
     } catch (e: any) {
@@ -73,7 +73,7 @@ export const useProfileStore = defineStore('profile', () => {
     loading.value = true
     error.value = null
     try {
-      const res = await axios.put('/api/password', {
+  const res = await api.put('/api/password', {
         currentPassword,
         newPassword
       })

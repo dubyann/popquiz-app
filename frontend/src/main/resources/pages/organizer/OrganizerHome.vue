@@ -79,13 +79,17 @@
   </div>
 </template>
 <script setup lang="ts">
-import { ref, onMounted, watchEffect } from 'vue'
+import { ref, onMounted, watchEffect, toRef } from 'vue'
 import { useRouter } from 'vue-router'
-import axios from 'axios'
+import { useOrganizerStore } from '../../../../stores/organizer'
+
 const router = useRouter()
-const lectures = ref<any[]>([])
-const users = ref<any[]>([])
+const organizerStore = useOrganizerStore()
+
+const lectures = toRef(organizerStore, 'lectures')
+const users = toRef(organizerStore, 'users')
 const showType = ref('') // '' | 'lectures' | 'users'
+
 function getStatusText(status: number) {
   switch (status) {
     case 0: return '未开始'
@@ -95,13 +99,13 @@ function getStatusText(status: number) {
   }
 }
 // 角色显示美化
-function getRoleText(role) {
+function getRoleText(role: any) {
   if (role === 'organizer') return '组织者'
   if (role === 'speaker') return '讲师'
   if (role === 'listener') return '听众'
   return role
 }
-function formatDateTime(dt) {
+function formatDateTime(dt: any) {
   if (!dt) return '-';
   const d = new Date(dt)
   if (isNaN(d.getTime())) return dt;
@@ -112,38 +116,24 @@ function formatDateTime(dt) {
   const min = d.getMinutes().toString().padStart(2,'0')
   return `${y}-${m}-${day} ${h}:${min}`
 }
-// 获取全部讲座
-async function fetchLectures() {
-  try {
-    const res = await axios.get('/api/lectures')
-    lectures.value = res.data
-  } catch (e) {
-    console.error('获取讲座列表失败', e)
-  }
-}
-// 获取全部用户
-async function fetchUsers() {
-  const token = localStorage.getItem('token')
-  const res = await axios.get('/api/users', {
-    headers: { Authorization: `Bearer ${token}` }
-  })
-  users.value = res.data
-}
+
 onMounted(() => {
   // 默认不显示表格
   showType.value = ''
-  fetchLectures()
+  organizerStore.fetchLectures()
 })
+
 watchEffect(() => {
   if (showType.value === 'users' && users.value.length === 0) {
-    fetchUsers()
+    organizerStore.fetchUsers()
   }
 })
+
 function goToPage(id: number, tab: string) {
   router.push(`/organizer/lectures/${id}/${tab}`)
 }
-// 讲座卡片状态徽章样式
-function getStatusClass(status) {
+
+function getStatusClass(status: number) {
   if (status === 0) return 'status-created'
   if (status === 1) return 'status-teaching'
   if (status === 2) return 'status-ended'
@@ -189,6 +179,7 @@ function getStatusClass(status) {
   flex-direction: column;
   align-items: center;
   background: rgba(255, 255, 255, 0.8);
+  -webkit-backdrop-filter: blur(20px);
   backdrop-filter: blur(20px);
   border-radius: 24px;
   padding: 3rem 2.5rem;

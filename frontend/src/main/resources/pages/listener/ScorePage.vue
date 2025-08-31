@@ -178,15 +178,7 @@
               <span class="detail-desc">{{ Number(myStats.total_questions) > 0 ? myStats.total_questions : (Array.isArray(myAnswers) ? myAnswers.length : 0) }}/{{ totalQuestions }} 题作答</span>
             </div>
           </div>
-          <!-- 注释掉平均答题时间计算
-          <div v-if="myStats.avg_answer_time_ms" class="detail-item">
-            <div class="detail-label">平均答题时间</div>
-            <div class="detail-value">
-              <span class="completion-rate">{{ Math.round(myStats.avg_answer_time_ms / 1000) }}秒</span>
-              <span class="detail-desc">每题平均用时</span>
-            </div>
-          </div>
-          -->
+          <!-- 平均答题时间（如需启用，可移除下面注释） -->
           
           <!-- 分组完成情况 -->
           <div v-if="groupStats.length > 0" class="group-stats-section">
@@ -360,6 +352,7 @@ const getCurrentUserId = () => {
       const userId = payload.userId || payload.id || payload.user_id || payload.sub
       if (userId) return parseInt(userId)
     } catch (e) {
+      console.debug('token parse error', e)
       // 忽略token解析错误
     }
     
@@ -370,6 +363,7 @@ const getCurrentUserId = () => {
     }
     
   } catch (e) {
+    console.debug('parse error', e)
     // 忽略解析错误
   }
   
@@ -591,6 +585,7 @@ onMounted(() => {
 
 .stat-card {
   background: rgba(255, 255, 255, 0.8);
+  -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
   border-radius: 16px;
   padding: 1.5rem;
@@ -1107,13 +1102,6 @@ onMounted(() => {
   font-size: 0.9rem;
 }
 
-.group-questions {
-  font-size: 0.8rem;
-  color: #6b7280;
-  background: rgba(16, 163, 127, 0.1);
-  padding: 0.1rem 0.4rem;
-  border-radius: 4px;
-}
 
 .group-metrics {
   display: flex;

@@ -1,6 +1,12 @@
+// ...existing code retained below
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import axios from 'axios'
+import { useCaptchaStore } from './captcha'
+import { useFormStore } from './form'
+
+// 延迟导入其他 stores，避免模块初始化顺序或循环依赖导致 useXStore() 在顶层返回 null
+// 在需要时通过 getFormStore()/getCaptchaStore() 懒获取
 
 // token 存储键名
 const TOKEN_KEY = 'token'
@@ -14,13 +20,19 @@ export const useAuthStore = defineStore('auth', () => {
   const user = ref<any>(null)
   const role = ref<string | null>(null)
 
-  // 验证码 / 注册相关状态
-  const captchaToken = ref<string>('')
-  const captchaTarget = ref<number | null>(null)
-  const lastCaptchaSvg = ref<string>('') // 规范化后用于 <img> 的 data URL
-  const lastCaptchaSvgText = ref<string>('') // 原始或解码后的 SVG 文本，可用于 v-html
-  const sliderPosition = ref<number>(50)
-  const showTarget = ref<boolean>(false)
+  // 延迟获取其他 store 的 helper（可能在模块初始化期间尚未就绪）
+  function getFormStore() {
+    try { return useFormStore() } catch (err) { console.debug('getFormStore not ready', err); return null }
+  }
+
+  function getCaptchaStore() {
+    try { return useCaptchaStore() } catch (err) { console.debug('getCaptchaStore not ready', err); return null }
+  }
+
+  // 本地 fallback（当 form/captcha store 尚不可用时使用）
+  const _localErrors = ref<{ [k: string]: string }>({ username: '', password: '', confirmPassword: '', role: '', contact: '' })
+  const _localErrorMessage = ref('')
+  const _localSuccessMessage = ref('')
   const isRegistering = ref(false)
 
   // 注册表单状态（全部由 Pinia 管理）
@@ -36,12 +48,7 @@ export const useAuthStore = defineStore('auth', () => {
   const logRole = ref('')
   const isLoading = ref(false)
 
-  const errors = ref<{ [k: string]: string }>(
-    { username: '', password: '', confirmPassword: '', role: '', contact: '' }
-  )
-
-  const errorMessage = ref('')
-  const successMessage = ref('')
+  // error messages normally delegated to form store；这里用代理以防止循环依赖
 
   // ---------------------------
   // 计算属性（getters）
@@ -83,19 +90,30 @@ export const useAuthStore = defineStore('auth', () => {
    * 清空所有消息与表单错误
    */
   function clearMessages() {
-    errorMessage.value = ''
-    successMessage.value = ''
-    errors.value = { username: '', password: '', confirmPassword: '', role: '', contact: '' }
+    const fs = getFormStore()
+    if (fs && typeof fs.clearMessages === 'function') return fs.clearMessages()
+    _localErrorMessage.value = ''
+    _localSuccessMessage.value = ''
+    _localErrors.value = { username: '', password: '', confirmPassword: '', role: '', contact: '' }
   }
 
   /**
    * 清除某个字段的错误
    */
   function clearFieldError(field: string) {
-    // 有时会传入动态字段名，使用索引访问
-    // @ts-ignore
-    errors.value[field] = ''
-    if (errorMessage.value) errorMessage.value = ''
+    const fs = getFormStore()
+    try {
+      if (fs && typeof fs.clearFieldError === 'function') {
+        // @ts-ignore
+        return fs.clearFieldError(field)
+      }
+      // fallback
+      // @ts-ignore
+      _localErrors.value[field] = ''
+    } catch (e) {
+      // ignore
+    }
+    if (_localErrorMessage.value) _localErrorMessage.value = ''
   }
 
   // ---------------------------
@@ -109,18 +127,19 @@ export const useAuthStore = defineStore('auth', () => {
     let isValid = true
     const uname = loginUsername.value.trim()
     const pwd = (p || '').toString()
+    const fs = getFormStore()
 
-    if (!uname) { errors.value.username = '请输入用户名'; isValid = false }
-    else if (uname.length < 2) { errors.value.username = '用户名至少需要2个字符'; isValid = false }
-    else if (uname.length > 20) { errors.value.username = '用户名不能超过20个字符'; isValid = false }
-    else if (!/^[a-zA-Z0-9_\u4e00-\u9fa5]+$/.test(uname)) { errors.value.username = '用户名只能包含字母、数字、下划线和中文'; isValid = false }
+  if (!uname) { (fs ? (fs.errors as any) : _localErrors).username = '请输入用户名'; isValid = false }
+  else if (uname.length < 2) { (fs ? (fs.errors as any) : _localErrors).username = '用户名至少需要2个字符'; isValid = false }
+  else if (uname.length > 20) { (fs ? (fs.errors as any) : _localErrors).username = '用户名不能超过20个字符'; isValid = false }
+  else if (!/^[a-zA-Z0-9_\u4e00-\u9fa5]+$/.test(uname)) { (fs ? (fs.errors as any) : _localErrors).username = '用户名只能包含字母、数字、下划线和中文'; isValid = false }
 
-    if (!pwd) { errors.value.password = '请输入密码'; isValid = false }
-    else if (pwd.length < 4) { errors.value.password = '密码至少需要4个字符'; isValid = false }
-    else if (pwd.length > 50) { errors.value.password = '密码不能超过50个字符'; isValid = false }
+  if (!pwd) { (fs ? (fs.errors as any) : _localErrors).password = '请输入密码'; isValid = false }
+  else if (pwd.length < 4) { (fs ? (fs.errors as any) : _localErrors).password = '密码至少需要4个字符'; isValid = false }
+  else if (pwd.length > 50) { (fs ? (fs.errors as any) : _localErrors).password = '密码不能超过50个字符'; isValid = false }
 
-    if (!logRole.value) { errors.value.role = '请选择用户角色'; isValid = false }
-    else if (!['listener', 'speaker', 'organizer'].includes(logRole.value)) { errors.value.role = '请选择有效的用户角色'; isValid = false }
+  if (!logRole.value) { (fs ? (fs.errors as any) : _localErrors).role = '请选择用户角色'; isValid = false }
+  else if (!['listener', 'speaker', 'organizer'].includes(logRole.value)) { (fs ? (fs.errors as any) : _localErrors).role = '请选择有效的用户角色'; isValid = false }
 
     return isValid
   }
@@ -131,27 +150,28 @@ export const useAuthStore = defineStore('auth', () => {
     const uname = registerUsername.value.trim()
     const pwd = (p || '').toString()
     const cPwd = (cp || '').toString()
+    const fs = getFormStore()
 
-    if (!uname) { errors.value.username = '请输入用户名'; isValid = false }
-    else if (uname.length < 2) { errors.value.username = '用户名至少需要2个字符'; isValid = false }
-    else if (uname.length > 20) { errors.value.username = '用户名不能超过20个字符'; isValid = false }
-    else if (!/^[a-zA-Z0-9_\u4e00-\u9fa5]+$/.test(uname)) { errors.value.username = '用户名只能包含字母、数字、下划线和中文'; isValid = false }
+  if (!uname) { (fs ? (fs.errors as any) : _localErrors).username = '请输入用户名'; isValid = false }
+  else if (uname.length < 2) { (fs ? (fs.errors as any) : _localErrors).username = '用户名至少需要2个字符'; isValid = false }
+  else if (uname.length > 20) { (fs ? (fs.errors as any) : _localErrors).username = '用户名不能超过20个字符'; isValid = false }
+  else if (!/^[a-zA-Z0-9_\u4e00-\u9fa5]+$/.test(uname)) { (fs ? (fs.errors as any) : _localErrors).username = '用户名只能包含字母、数字、下划线和中文'; isValid = false }
 
-    if (!pwd) { errors.value.password = '请输入密码'; isValid = false }
-    else if (pwd.length < 6) { errors.value.password = '密码至少需要6个字符'; isValid = false }
-    else if (pwd.length > 50) { errors.value.password = '密码不能超过50个字符'; isValid = false }
+  if (!pwd) { (fs ? (fs.errors as any) : _localErrors).password = '请输入密码'; isValid = false }
+  else if (pwd.length < 6) { (fs ? (fs.errors as any) : _localErrors).password = '密码至少需要6个字符'; isValid = false }
+  else if (pwd.length > 50) { (fs ? (fs.errors as any) : _localErrors).password = '密码不能超过50个字符'; isValid = false }
 
-    if (!cPwd) { errors.value.confirmPassword = '请确认密码'; isValid = false }
-    else if (pwd !== cPwd) { errors.value.confirmPassword = '两次输入的密码不一致'; isValid = false }
+  if (!cPwd) { (fs ? (fs.errors as any) : _localErrors).confirmPassword = '请确认密码'; isValid = false }
+  else if (pwd !== cPwd) { (fs ? (fs.errors as any) : _localErrors).confirmPassword = '两次输入的密码不一致'; isValid = false }
 
-    if (!regRole.value) { errors.value.role = '请选择用户角色'; isValid = false }
-    else if (!['listener', 'speaker', 'organizer'].includes(regRole.value)) { errors.value.role = '请选择有效的用户角色'; isValid = false }
+  if (!regRole.value) { (fs ? (fs.errors as any) : _localErrors).role = '请选择用户角色'; isValid = false }
+  else if (!['listener', 'speaker', 'organizer'].includes(regRole.value)) { (fs ? (fs.errors as any) : _localErrors).role = '请选择有效的用户角色'; isValid = false }
 
-    const contactVal = contact.value.trim()
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-    const phoneRegex = /^\+?[0-9]{7,15}$/
-    if (!contactVal) { errors.value.contact = '请输入邮箱或手机号'; isValid = false }
-    else if (!emailRegex.test(contactVal) && !phoneRegex.test(contactVal)) { errors.value.contact = '请输入有效的邮箱或手机号'; isValid = false }
+  const contactVal = contact.value.trim()
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+  const phoneRegex = /^\+?\d{7,15}$/
+  if (!contactVal) { (fs ? (fs.errors as any) : _localErrors).contact = '请输入邮箱或手机号'; isValid = false }
+  else if (!emailRegex.test(contactVal) && !phoneRegex.test(contactVal)) { (fs ? (fs.errors as any) : _localErrors).contact = '请输入有效的邮箱或手机号'; isValid = false }
 
     return isValid
   }
@@ -162,79 +182,16 @@ export const useAuthStore = defineStore('auth', () => {
   // 我们将解码并同时提供用于 v-html 的原始 svgText 与用于 <img> 的 data URL 备用值 lastCaptchaSvg
   // ---------------------------
   async function fetchCaptcha() {
-    try {
-      const r = await axios.get('/api/auth/captcha')
-      captchaToken.value = r.data.captchaToken
-
-      const rawSvgText = r.data.svgText || ''
-      let svgText = rawSvgText
-
-      // 如果后端返回被 HTML 转义的 svg 字符串，先解码
-      try {
-        if (svgText && /&lt;|&gt;|&amp;/.test(svgText)) {
-          const ta = document.createElement('textarea')
-          ta.innerHTML = svgText
-          svgText = ta.value || svgText
-        }
-      } catch (err) {
-        // 忽略解码失败，保留原值
-        console.debug('svgText 解码失败', err)
-      }
-
-      // 保存解码后的 svgText 以便组件使用 v-html
-      lastCaptchaSvgText.value = svgText
-
-      // 优先使用后端直接提供的 data URL（r.data.svg）
-      if (r.data.svg) {
-        lastCaptchaSvg.value = r.data.svg
-      } else {
-        const txt = (svgText || '').trim()
-        if (!txt) {
-          lastCaptchaSvg.value = ''
-        } else if (/^data%3A/i.test(txt)) {
-          // 完整的百分号编码 data URL
-          try { lastCaptchaSvg.value = decodeURIComponent(txt) } catch (e) { lastCaptchaSvg.value = txt }
-        } else if (/^data:/i.test(txt)) {
-          // 已是 data URL
-          lastCaptchaSvg.value = txt
-        } else if (/^data:image\/svg\+xml;utf8,data%3A/i.test(txt)) {
-          // 双重包装的 data URL：取逗号后的部分解码
-          try {
-            const idx = txt.indexOf(',')
-            const tail = txt.slice(idx + 1)
-            const decodedTail = decodeURIComponent(tail)
-            if (/^data:/i.test(decodedTail)) {
-              lastCaptchaSvg.value = decodedTail
-            } else {
-              lastCaptchaSvg.value = 'data:image/svg+xml;utf8,' + decodedTail
-            }
-          } catch (e) {
-            lastCaptchaSvg.value = txt
-          }
-        } else if (/^<svg[\s>]/i.test(txt)) {
-          // 原始 svg 标记 -> 作为 data URL 备用
-          try { lastCaptchaSvg.value = 'data:image/svg+xml;utf8,' + encodeURIComponent(txt) } catch (e) { lastCaptchaSvg.value = '' }
-        } else {
-          // 其他文本，尝试通过 encodeURIComponent 转为 data URL
-          try { lastCaptchaSvg.value = 'data:image/svg+xml;utf8,' + encodeURIComponent(txt) } catch (e) { lastCaptchaSvg.value = '' }
-        }
-      }
-
-      captchaTarget.value = r.data.target
-      sliderPosition.value = Math.floor(Math.random() * 101)
-      return r.data
-    } catch (e) {
-      console.warn('fetchCaptcha 失败', e)
-      captchaToken.value = ''
-      captchaTarget.value = null
-      return null
-    }
+  // delegate to captcha store when available
+  const cs = getCaptchaStore()
+  if (cs && typeof cs.fetchCaptcha === 'function') return cs.fetchCaptcha()
+  return null
   }
 
   function refreshCaptcha() {
-    captchaToken.value = ''
-    captchaTarget.value = null
-    return fetchCaptcha()
+  const cs = getCaptchaStore()
+  if (cs && typeof cs.refreshCaptcha === 'function') return cs.refreshCaptcha()
+  return null
   }
 
   // ---------------------------
@@ -243,7 +200,7 @@ export const useAuthStore = defineStore('auth', () => {
   async function register(payload: { username: string; password: string; role: string; contact: string; captchaToken?: string; sliderPosition?: number }) {
     isRegistering.value = true
     try {
-      const res = await axios.post('/api/auth/register', payload)
+  const res = await axios.post('/api/auth/register', payload)
       isRegistering.value = false
       return res.data
     } catch (err) {
@@ -257,24 +214,31 @@ export const useAuthStore = defineStore('auth', () => {
     isRegistering.value = true
     clearMessages()
     try {
+      const cs = getCaptchaStore()
       const payload: any = {
         username: registerUsername.value.trim(),
         password: (pwd || '').toString(),
         role: regRole.value,
         contact: contact.value.trim(),
-        captchaToken: captchaToken.value,
+        captchaToken: cs ? cs.captchaToken : undefined,
         captchaCode: captchaInput.value
       }
       const res = await register(payload)
       if (res && res.message && String(res.message).includes('注册成功')) {
-        successMessage.value = String(res.message)
+        const fs = getFormStore()
+        if (fs) fs.successMessage = String(res.message)
+        else _localSuccessMessage.value = String(res.message)
         return { ok: true, data: res }
       } else {
-        errorMessage.value = (res && res.error) || '注册失败'
+        const fs = getFormStore()
+        if (fs) fs.errorMessage = (res && res.error) || '注册失败'
+        else _localErrorMessage.value = (res && res.error) || '注册失败'
         return { ok: false, data: res }
       }
     } catch (err: any) {
-      errorMessage.value = err.response?.data?.error || err.message || '注册异常'
+  const fs = getFormStore()
+  if (fs) fs.errorMessage = err.response?.data?.error || err.message || '注册异常'
+  else _localErrorMessage.value = err.response?.data?.error || err.message || '注册异常'
       throw err
     } finally {
       isRegistering.value = false
@@ -342,26 +306,24 @@ export const useAuthStore = defineStore('auth', () => {
     removeToken,
     clearAuth,
 
-    // captcha
-    captchaToken,
-    captchaTarget,
-    sliderPosition,
-    showTarget,
-    isRegistering,
-    fetchCaptcha,
-    refreshCaptcha,
-    lastCaptchaSvg,
-    lastCaptchaSvgText,
+  // captcha (delegated to captchaStore when available, fallback to safe values)
+  captchaToken: computed(() => getCaptchaStore()?.captchaToken ?? ''),
+  captchaTarget: computed(() => getCaptchaStore()?.captchaTarget ?? null),
+  isRegistering,
+  fetchCaptcha,
+  refreshCaptcha,
+  lastCaptchaSvg: computed(() => getCaptchaStore()?.lastCaptchaSvg ?? ''),
+  lastCaptchaSvgText: computed(() => getCaptchaStore()?.lastCaptchaSvgText ?? ''),
 
     // 注册表单（Pinia 管理）
     loginUsername,
     registerUsername,
     regRole,
     contact,
-    captchaInput,
-    errors,
-    errorMessage,
-    successMessage,
+  captchaInput,
+  errors: computed(() => getFormStore()?.errors ?? _localErrors.value),
+  errorMessage: computed({ get: () => getFormStore()?.errorMessage ?? _localErrorMessage.value, set: (v: any) => { const fs = getFormStore(); if (fs) fs.errorMessage = v; else _localErrorMessage.value = v } }),
+  successMessage: computed({ get: () => getFormStore()?.successMessage ?? _localSuccessMessage.value, set: (v: any) => { const fs = getFormStore(); if (fs) fs.successMessage = v; else _localSuccessMessage.value = v } }),
     // login
     logRole,
     isLoading,

@@ -33,13 +33,18 @@
   </div>
 </template>
 <script setup lang="ts">
-import { ref } from 'vue'
-// mock数据，实际应从API获取
-const users = ref([
-  { id: 1, name: '张三', score: 88, accuracy: 88, answerRate: 100 },
-  { id: 2, name: '李四', score: 72, accuracy: 72, answerRate: 90 },
-  { id: 3, name: '王五', score: 95, accuracy: 95, answerRate: 100 },
-])
+import { onMounted, toRef } from 'vue'
+import { useRoute } from 'vue-router'
+import { useOrganizerStore } from '../../../../stores/organizer'
+
+const route = useRoute()
+const lectureId = route.params.id
+const organizerStore = useOrganizerStore()
+const users = toRef(organizerStore, 'scores')
+
+onMounted(() => {
+  organizerStore.fetchScores(lectureId)
+})
 </script>
 <style scoped>
 .stats-wrapper {

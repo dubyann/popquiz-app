@@ -84,18 +84,18 @@
             
             <div class="modal-body">
               <div class="input-group">
-                <label>讲座标题</label>
-                <input v-model="newLecture.title" placeholder="请输入讲座标题" />
+                <label for="new-lecture-title">讲座标题</label>
+                <input id="new-lecture-title" v-model="newLecture.title" placeholder="请输入讲座标题" />
               </div>
               
               <div class="input-group">
-                <label>讲座简介</label>
-                <textarea v-model="newLecture.desc" placeholder="请简要描述讲座内容..." rows="3"></textarea>
+                <label for="new-lecture-desc">讲座简介</label>
+                <textarea id="new-lecture-desc" v-model="newLecture.desc" placeholder="请简要描述讲座内容..." rows="3"></textarea>
               </div>
               
               <div class="input-group">
-                <label>主讲人</label>
-                <input v-model="newLecture.speaker" placeholder="请输入主讲人姓名" />
+                <label for="new-lecture-speaker">主讲人</label>
+                <input id="new-lecture-speaker" v-model="newLecture.speaker" placeholder="请输入主讲人姓名" />
               </div>
             </div>
             
@@ -240,6 +240,7 @@ onMounted(() => {
   border: 1px solid rgba(255, 255, 255, 0.3);
   position: relative;
   z-index: 1;
+    -webkit-backdrop-filter: blur(20px);
 }
 
 .speaker-home::before {
@@ -277,7 +278,8 @@ onMounted(() => {
   font-weight: 800;
   background: linear-gradient(135deg, #10a37f 0%, #059669 100%);
   -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
   background-clip: text;
   margin: 0 0 0.8rem 0;
   letter-spacing: -0.5px;
@@ -344,8 +346,10 @@ onMounted(() => {
   background: rgba(255, 255, 255, 0.9);
   color: #10a37f;
   border: 2px solid #10a37f;
+  -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
 }
+/* stray duplicates removed */
 
 .create-btn:hover {
   transform: translateY(-3px);
@@ -373,9 +377,7 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 1.5rem;
-  padding: 0 0.5rem;
 }
-
 .list-header h3 {
   font-size: 1.8rem;
   font-weight: 700;
@@ -432,7 +434,6 @@ onMounted(() => {
 
 .lecture-card {
   background: rgba(255, 255, 255, 0.8);
-  backdrop-filter: blur(10px);
   border: 1px solid rgba(148, 163, 184, 0.2);
   border-radius: 16px;
   padding: 0.8rem;
@@ -441,6 +442,8 @@ onMounted(() => {
   overflow: hidden;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
   cursor: pointer;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
 }
 
 .lecture-card::before {

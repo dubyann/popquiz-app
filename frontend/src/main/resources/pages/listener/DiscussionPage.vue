@@ -75,8 +75,9 @@
         <!-- 正常评论表单 -->
         <form v-else class="comment-form" @submit.prevent="submitComment">
           <div class="form-group">
-            <label class="form-label">💭 您的观点</label>
+            <label class="form-label" for="comment-input">💭 您的观点</label>
             <textarea 
+              id="comment-input"
               v-model="newComment.text" 
               placeholder="分享您对本次讲座的想法、问题或建议..." 
               required
@@ -97,7 +98,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, Ref } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useListenerStore } from '../../../../stores/listener'
 
@@ -326,6 +327,7 @@ const initializeData = async () => {
       const data = await listenerStore.fetchLecture(String(lectureId))
       currentLecture.value = data || null
     } catch (e) {
+      console.debug('parse current lecture error', e)
       currentLecture.value = null
     }
     
@@ -787,6 +789,7 @@ onUnmounted(() => {
 .lecture-ended-notice,
 .lecture-upcoming-notice {
   background: rgba(255, 255, 255, 0.8);
+  -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
   border: 1px solid rgba(255, 255, 255, 0.3);
   border-radius: 16px;

@@ -94,68 +94,23 @@
   </div>
 </template>
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-
+import { ref, onMounted, toRef } from 'vue'
 import { useRoute } from 'vue-router'
-import axios from 'axios'
+import { useOrganizerStore } from '../../../../stores/organizer'
 
 const route = useRoute()
 const lectureId = route.params.id
-const feedbacks = ref<any[]>([])
-const loading = ref(true)
-const stats = ref<any[]>([])
-const totalCount = ref(0)
+const organizerStore = useOrganizerStore()
+
+const feedbacks = toRef(organizerStore, 'feedbacks')
+const stats = toRef(organizerStore, 'stats')
+const totalCount = toRef(organizerStore, 'totalCount')
+const statsSummary = toRef(organizerStore, 'statsSummary')
 const showSections = ref<{[key:string]: boolean}>({ typeStats: false, stats: false, details: false })
-const statsSummary = ref({ total: 0, positive: 0, average: 0 })
-
-async function fetchStats() {
-  try {
-    const token = localStorage.getItem('token')
-    const res = await axios.get(`/api/feedback/lecture/${lectureId}/stats`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-    if (res.data && res.data.success && res.data.data && res.data.data.stats) {
-      stats.value = res.data.data.stats
-      totalCount.value = res.data.data.totalCount || 0
-      // 统计区块数据
-      const statArr = res.data.data.stats || []
-      const total = res.data.data.totalCount || 0
-      const positive = statArr.find(s => s.feedback_type === 'good')?.count || 0
-      const average = total > 0 ? parseFloat((positive * 5 / total).toFixed(1)) : 0
-      statsSummary.value = { total, positive, average }
-    } else {
-      stats.value = []
-      totalCount.value = 0
-      statsSummary.value = { total: 0, positive: 0, average: 0 }
-    }
-  } catch (e) {
-    stats.value = []
-    totalCount.value = 0
-    statsSummary.value = { total: 0, positive: 0, average: 0 }
-  }
-}
-
-async function fetchFeedbacks() {
-  loading.value = true
-  try {
-    const token = localStorage.getItem('token')
-    const res = await axios.get(`/api/feedback/lecture/${lectureId}/all`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-    if (res.data && res.data.success && res.data.data && res.data.data.feedbacks) {
-      feedbacks.value = res.data.data.feedbacks
-    } else {
-      feedbacks.value = []
-    }
-  } catch (e) {
-    feedbacks.value = []
-  }
-  loading.value = false
-}
 
 onMounted(() => {
-  fetchStats()
-  fetchFeedbacks()
+  organizerStore.fetchStats(lectureId)
+  organizerStore.fetchFeedbacks(lectureId)
 })
 </script>
 <style scoped>

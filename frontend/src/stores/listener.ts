@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import axios from 'axios'
+import api from '../utils/api'
 
 export const useListenerStore = defineStore('listener', () => {
   // 我的讲座列表
@@ -57,7 +57,7 @@ export const useListenerStore = defineStore('listener', () => {
     try {
       const token = localStorage.getItem('token') || sessionStorage.getItem('token')
       if (!token) return null
-      const res = await axios.get(`/api/quiz/lecture/${lectureId}/published`, { headers: { Authorization: `Bearer ${token}` } })
+    const res = await api.get(`/api/quiz/lecture/${lectureId}/published`)
       if (res.status === 200 && res.data && res.data.data) {
         const quizzes = res.data.data.quizzes || []
         const publishedQuizzes = quizzes.filter((q: any) => q.published)
@@ -83,10 +83,10 @@ export const useListenerStore = defineStore('listener', () => {
       if (!token) return null
       let res: any = null
       try {
-        res = await axios.get(`/api/quiz/lecture/${lectureId}/my-answers`, { headers: { Authorization: `Bearer ${token}` } })
+          res = await api.get(`/api/quiz/lecture/${lectureId}/my-answers`)
       } catch (e1) {
         try {
-          res = await axios.get(`/api/answers/lecture/${lectureId}/my-answers`, { headers: { Authorization: `Bearer ${token}` } })
+            res = await api.get(`/api/answers/lecture/${lectureId}/my-answers`)
         } catch (e2) {
           console.error('both quiz/my-answers endpoints failed', e1, e2)
           return null
@@ -122,7 +122,7 @@ export const useListenerStore = defineStore('listener', () => {
     try {
       const token = localStorage.getItem('token') || sessionStorage.getItem('token')
       if (!token) throw new Error('not authenticated')
-      const res = await axios.post(`/api/quiz/${questionId}/answer`, { answer: payload.answer, lectureId: payload.lectureId }, { headers: { Authorization: `Bearer ${token}` } })
+    const res = await api.post(`/api/quiz/${questionId}/answer`, { answer: payload.answer, lectureId: payload.lectureId })
       if (res && res.status === 200 && res.data) {
         const data = res.data
         // 更新本地 map
@@ -149,7 +149,7 @@ export const useListenerStore = defineStore('listener', () => {
     try {
       const token = localStorage.getItem('token') || sessionStorage.getItem('token')
       if (!token) return
-      const res = await axios.get('/api/participants/my-lectures', { headers: { Authorization: `Bearer ${token}` } })
+    const res = await api.get('/api/participants/my-lectures')
       // axios 返回的响应在 res.status 中；后端可能把实际数据放在 res.data
       if (res.status === 200 && res.data) {
         myLectures.value = res.data || []
@@ -165,7 +165,7 @@ export const useListenerStore = defineStore('listener', () => {
       isJoining.value = true
       const token = localStorage.getItem('token') || sessionStorage.getItem('token')
       if (!token) throw new Error('not authenticated')
-      const res = await axios.post(`/api/participants/join/${lectureId}`, {}, { headers: { Authorization: `Bearer ${token}` } })
+    const res = await api.post(`/api/participants/join/${lectureId}`, {})
       // 如果 join 成功，记录到 joinedLectures，避免重复 join
       try {
         joinedLectures.value.add(String(lectureId))
@@ -188,7 +188,7 @@ export const useListenerStore = defineStore('listener', () => {
     try {
       const token = localStorage.getItem('token') || sessionStorage.getItem('token')
       if (!token) return null
-      const res = await axios.get(`/api/lectures/${lectureId}`, { headers: { Authorization: `Bearer ${token}` } })
+    const res = await api.get(`/api/lectures/${lectureId}`)
       if (res && res.status === 200 && res.data) {
         lectureDetail.value = res.data.data || res.data || null
         return lectureDetail.value
@@ -208,7 +208,7 @@ export const useListenerStore = defineStore('listener', () => {
     try {
       const token = localStorage.getItem('token') || sessionStorage.getItem('token')
       if (!token) return
-      const res = await axios.get(`/api/discussion/lecture/${lectureId}/messages`, { headers: { Authorization: `Bearer ${token}` } })
+    const res = await api.get(`/api/discussion/lecture/${lectureId}/messages`)
       if (res.data && (res.data.success || res.status === 200)) {
         comments.value = (res.data.data && res.data.data.messages) || res.data.messages || []
       } else {
@@ -227,7 +227,7 @@ export const useListenerStore = defineStore('listener', () => {
     try {
       const token = localStorage.getItem('token') || sessionStorage.getItem('token')
       if (!token) throw new Error('not authenticated')
-      const res = await axios.post(`/api/discussion/lecture/${lectureId}/message`, { message: message.trim() }, { headers: { Authorization: `Bearer ${token}` } })
+    const res = await api.post(`/api/discussion/lecture/${lectureId}/message`, { message: message.trim() })
       // 刷新列表
       await loadDiscussionMessages(lectureId)
       return res.data
@@ -242,7 +242,7 @@ export const useListenerStore = defineStore('listener', () => {
     try {
       const token = localStorage.getItem('token') || sessionStorage.getItem('token')
       if (!token) return null
-      const res = await axios.post(`/api/discussion/message/${messageId}/like`, {}, { headers: { Authorization: `Bearer ${token}` } })
+    const res = await api.post(`/api/discussion/message/${messageId}/like`, {})
       // 如果传入 lectureId，则刷新对应讲座的讨论列表
       if (lectureId) await loadDiscussionMessages(lectureId)
       return res.data
@@ -258,7 +258,7 @@ export const useListenerStore = defineStore('listener', () => {
       if (!lectureId) return null
       const token = localStorage.getItem('token') || sessionStorage.getItem('token')
       if (!token) return null
-      const res = await axios.post(`/api/discussion/lecture/${lectureId}/message/${messageId}/pin`, {}, { headers: { Authorization: `Bearer ${token}` } })
+    const res = await api.post(`/api/discussion/lecture/${lectureId}/message/${messageId}/pin`, {})
       await loadDiscussionMessages(lectureId)
       return res.data
     } catch (e) {
@@ -273,7 +273,7 @@ export const useListenerStore = defineStore('listener', () => {
       if (!lectureId) return null
       const token = localStorage.getItem('token') || sessionStorage.getItem('token')
       if (!token) return null
-      const res = await axios.delete(`/api/discussion/lecture/${lectureId}/message/${messageId}`, { headers: { Authorization: `Bearer ${token}` } })
+    const res = await api.delete(`/api/discussion/lecture/${lectureId}/message/${messageId}`)
       await loadDiscussionMessages(lectureId)
       return res.data
     } catch (e) {
@@ -287,7 +287,7 @@ export const useListenerStore = defineStore('listener', () => {
     try {
       const token = localStorage.getItem('token') || sessionStorage.getItem('token')
       if (!token) return
-      const res = await axios.get('/api/feedback/types', { headers: { Authorization: `Bearer ${token}` } })
+    const res = await api.get('/api/feedback/types')
       if (res.data && res.data.success) {
         feedbackTypes.value = res.data.data.feedbackTypes || []
       }
@@ -301,7 +301,7 @@ export const useListenerStore = defineStore('listener', () => {
     try {
       const token = localStorage.getItem('token') || sessionStorage.getItem('token')
       if (!token) throw new Error('not authenticated')
-      const res = await axios.post(`/api/feedback/lecture/${lectureId}`, payload, { headers: { Authorization: `Bearer ${token}` } })
+    const res = await api.post(`/api/feedback/lecture/${lectureId}`, payload)
       return res.data
     } catch (e) {
       console.error('submitFeedback error', e)
@@ -313,7 +313,7 @@ export const useListenerStore = defineStore('listener', () => {
     try {
       const token = localStorage.getItem('token') || sessionStorage.getItem('token')
       if (!token) return
-      const res = await axios.get(`/api/feedback/lecture/${lectureId}/my-history`, { headers: { Authorization: `Bearer ${token}` } })
+    const res = await api.get(`/api/feedback/lecture/${lectureId}/my-history`)
       if (res.data && res.data.success) {
         feedbackHistory.value = res.data.data.history || []
       }
@@ -344,9 +344,9 @@ export const useListenerStore = defineStore('listener', () => {
       const myAnswersUrl = `/api/answers/lecture/${lectureId}/my-answers`
 
       const [statsRes, leaderboardRes, myAnswersRes] = await Promise.all([
-        axios.get(statsUrl, { headers }).catch(e => ({ error: e })),
-        axios.get(leaderboardUrl, { headers }).catch(e => ({ error: e })),
-        axios.get(myAnswersUrl, { headers }).catch(e => ({ error: e }))
+    api.get(statsUrl).catch(e => ({ error: e })),
+    api.get(leaderboardUrl).catch(e => ({ error: e })),
+    api.get(myAnswersUrl).catch(e => ({ error: e }))
       ])
 
       if (statsRes && !('error' in statsRes) && statsRes.data && statsRes.data.success) {

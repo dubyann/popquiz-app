@@ -112,7 +112,13 @@
     <!-- 主要内容区域 -->
     <div class="app-content">
       <component :is="isLectureLayout ? 'div' : 'main'" class="content-wrapper">
-        <router-view />
+        <router-view v-slot="{ Component }">
+          <component :is="Component" v-if="Component" />
+          <div v-else class="no-component">
+            <strong>未找到可渲染的组件</strong>
+            <p>页面内容为空。请打开控制台（F12）查看错误或路由守卫日志。</p>
+          </div>
+        </router-view>
       </component>
     </div>
 
@@ -306,11 +312,23 @@ const handleBeforeUnload = (event) => {
   return ''
 }
 
-// 获取用户角色
-const auth = useAuthStore()
+// 获取用户角色（防御性：避免在 Pinia 尚未安装时直接调用 useAuthStore 导致异常）
+let _auth = null
+function getAuth() {
+  if (_auth) return _auth
+  try {
+    _auth = useAuthStore()
+  } catch (err) {
+    console.debug('useAuthStore not ready yet', err)
+    _auth = null
+  }
+  return _auth
+}
+
 const getUserRole = () => {
-  if (auth && auth.role) return auth.role
-  if (auth && auth.user && auth.user.role) return auth.user.role
+  const a = getAuth()
+  if (a && a.role) return a.role
+  if (a && a.user && a.user.role) return a.user.role
   // 兜底：尝试从 storage 读取
   const token = sessionStorage.getItem('token') || localStorage.getItem('token')
   if (!token) return null
@@ -443,7 +461,8 @@ const handleLogout = () => {
     try {
       auth.clearAuth()
     } catch (e) {
-      // 兜底：直接清理 storage
+      // 记录异常以便诊断，然后兜底清理 storage
+      console.debug('auth.clearAuth failed, fallback to manual storage cleanup', e)
       sessionStorage.removeItem('token')
       localStorage.removeItem('token')
       localStorage.removeItem('authToken')
@@ -636,83 +655,99 @@ const updateCurrentLecture = async () => {
 }
 
 // 退出当前讲座
+// 辅助：解析 JWT payload（安全）
+function parseTokenPayload(token) {
+  if (!token) return null
+  try {
+    return JSON.parse(atob(token.split('.')[1]))
+  } catch (e) {
+  console.debug('parseTokenPayload failed', e)
+  return null
+  }
+}
+
+// 辅助：把低层错误转为用户友好消息
+function buildUserMessageFromError(err) {
+  if (!err) return '退出讲座失败'
+  try {
+    if (err.name === 'TypeError' && err.message.includes('fetch')) {
+      return '无法连接到服务器，请检查：\n1. 后端服务是否已启动\n2. 网络连接是否正常\n3. 服务器地址是否正确'
+    }
+    if (err.name === 'AbortError' || (err.message && err.message.includes('timeout'))) {
+      return '请求超时，请检查网络连接或稍后重试'
+    }
+    if (err.message && err.message.includes('网络')) return err.message
+  } catch (e) {
+    console.debug('buildUserMessageFromError inner error', e)
+  }
+  return `退出讲座失败: ${err.message || String(err)}`
+}
+
 const exitCurrentLecture = async () => {
   const currentLecture = getCurrentLecture()
   const userRole = getUserRole()
-  
-  if (!currentLecture || !userRole) {
+
+  if (!currentLecture || !userRole) return
+
+  const token = sessionStorage.getItem('token')
+  if (!token) return
+
+  const payload = parseTokenPayload(token)
+  const userId = payload?.id || payload?.userId || payload?.sub
+  const userName = payload?.name || payload?.username || `${userRole}_${userId}`
+
+  if (!navigator.onLine) {
+    const msg = '网络连接已断开，请检查网络连接后重试'
+    const continueAnyway = confirm(`${msg}\n\n是否要继续退出讲座？（将清除本地状态）`)
+    if (continueAnyway) {
+      const roleText = userRole === 'speaker' ? '讲师' : '听众'
+      alert(`${roleText}已在本地退出讲座，但服务器状态可能未同步`)
+    }
     return
   }
-  
-  try {
-    // 获取用户信息
-    const token = sessionStorage.getItem('token')
-    if (!token) return
-    
-    const payload = JSON.parse(atob(token.split('.')[1]))
-    const userId = payload.id || payload.userId || payload.sub
-    const userName = payload.name || payload.username || `${userRole}_${userId}`
-    
-    // 检查网络连接
-    if (!navigator.onLine) {
-      throw new Error('网络连接已断开，请检查网络连接后重试')
-    }
-    
-    // 调用后端API退出讲座
-    const response = await fetch(`/api/participants/leave/${currentLecture.id}`, {
+
+  // 将 API 调用提取到独立函数，降低主流程复杂度
+  async function leaveLectureApi(lectureId, token) {
+    const response = await fetch(`/api/participants/leave/${lectureId}`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json'
       },
-      // 添加超时和重试机制
-      signal: AbortSignal.timeout(10000) // 10秒超时
+      signal: AbortSignal.timeout(10000)
     })
-    
+
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ error: '服务器响应错误' }))
-      throw new Error(errorData.error || `服务器错误 (${response.status})`)
+      let serverMsg = `服务器错误 (${response.status})`
+      try {
+        const errJson = await response.json()
+        if (errJson && errJson.error) serverMsg = errJson.error
+      } catch (e) {
+        console.debug('leaveLectureApi: failed to parse error response', e)
+      }
+      throw new Error(serverMsg)
     }
-    
-    const result = await response.json()
-    console.log(`用户 ${userId} (${userName}) 已退出讲座 ${currentLecture.id}`)
-    
-    // 退出讲座成功，清除本地信息（注意：此函数不负责清除currentLectureData，由调用者处理）
-    
-    // 根据用户角色显示不同的提示
-    const roleText = userRole === 'speaker' ? '讲师' : '听众'
-    const message = `${roleText}已成功退出讲座"${currentLecture.title}"`
-    
-    console.log(message) // 用于调试，实际提示由调用者处理
-    
-  } catch (error) {
-    console.error('退出讲座时发生错误:', error)
-    
-    // 根据错误类型提供不同的提示
-    let errorMessage = '退出讲座失败'
-    
-    if (error.name === 'TypeError' && error.message.includes('fetch')) {
-      errorMessage = '无法连接到服务器，请检查：\n1. 后端服务是否已启动\n2. 网络连接是否正常\n3. 服务器地址是否正确'
-    } else if (error.name === 'AbortError' || error.message.includes('timeout')) {
-      errorMessage = '请求超时，请检查网络连接或稍后重试'
-    } else if (error.message.includes('网络')) {
-      errorMessage = error.message
-    } else {
-      errorMessage = `退出讲座失败: ${error.message}`
-    }
-    
-    // 询问用户是否要继续（仅清除本地状态）
-    const continueAnyway = confirm(`${errorMessage}\n\n是否要继续退出讲座？（将清除本地状态）`)
-    
+  }
+
+  function handleLeaveFailure(err, userRole) {
+    console.error('退出讲座时发生错误:', err)
+    const message = buildUserMessageFromError(err)
+    const continueAnyway = confirm(`${message}\n\n是否要继续退出讲座？（将清除本地状态）`)
     if (continueAnyway) {
-      // 用户选择继续，清除本地状态（注意：此函数不负责清除currentLectureData，由调用者处理）
-      
       const roleText = userRole === 'speaker' ? '讲师' : '听众'
       alert(`${roleText}已在本地退出讲座，但服务器状态可能未同步`)
-    } else {
-      // 重新抛出错误，让调用者知道失败了
-      throw error
     }
+    return continueAnyway
+  }
+
+  try {
+    await leaveLectureApi(currentLecture.id, token)
+    console.log(`用户 ${userId} (${userName}) 已退出讲座 ${currentLecture.id}`)
+    return
+  } catch (err) {
+    const cont = handleLeaveFailure(err, userRole)
+    if (cont) return
+    throw err
   }
 }
 
@@ -983,6 +1018,9 @@ function formatLectureTimePanel(lecture) {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
+  -webkit-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
 }
 
 #app {
@@ -998,6 +1036,7 @@ function formatLectureTimePanel(lecture) {
 /* 现代化头部导航 */
 .app-header {
   background: rgba(255, 255, 255, 0.95);
+  -webkit-backdrop-filter: blur(20px);
   backdrop-filter: blur(20px);
   border-bottom: 1px solid rgba(255, 255, 255, 0.2);
   position: fixed;
@@ -1071,6 +1110,7 @@ function formatLectureTimePanel(lecture) {
   top: 100%;
   right: 0;
   background: rgba(255, 255, 255, 0.95);
+  -webkit-backdrop-filter: blur(20px);
   backdrop-filter: blur(20px);
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 16px;
@@ -1252,6 +1292,7 @@ function formatLectureTimePanel(lecture) {
   right: 0;
   background: rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 12px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
@@ -1381,6 +1422,7 @@ function formatLectureTimePanel(lecture) {
   flex: 1;
   margin-top: 80px; /* 头部导航高度 */
   min-height: calc(100vh - 80px - 200px); /* 减去头部和页脚高度 */
+  animation: fadeIn 0.6s ease-out;
 }
 
 .content-wrapper {
@@ -1394,6 +1436,14 @@ main.content-wrapper {
   max-width: 1200px;
   margin: 0 auto;
   padding: 2rem;
+}
+
+.no-component {
+  border: 3px dashed #f87171;
+  background: rgba(248, 113, 113, 0.04);
+  padding: 2rem;
+  text-align: center;
+  color: #7f1d1d;
 }
 
 /* 简洁页脚 */
@@ -1547,7 +1597,7 @@ main.content-wrapper {
   
   .lecture-info-panel {
     right: -2rem;
-    min-width: 260px;
+      min-width: 260px;
   }
   
   .lecture-title {
@@ -1625,10 +1675,6 @@ main.content-wrapper {
     opacity: 1;
     transform: translateY(0);
   }
-}
-
-.app-content {
-  animation: fadeIn 0.6s ease-out;
 }
 
 /* 链接和按钮的通用样式 */

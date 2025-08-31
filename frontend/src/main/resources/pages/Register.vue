@@ -126,34 +126,61 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { formatErrorMessage } from '../../../utils/errorHandler'
-import { useRouter } from 'vue-router'
+import { useRouter, onBeforeRouteLeave } from 'vue-router'
 import { useAuthStore } from '../../../stores/auth'
-import { storeToRefs } from 'pinia'
-import { onBeforeRouteLeave } from 'vue-router'
+import { useFormStore } from '../../../stores/form'
+import { useCaptchaStore } from '../../../stores/captcha'
+// 使用延迟 getter，不在模块顶层直接调用 useXStore()，以避免初始化时的循环依赖或 null 引用
 
 // 将密码放在组件本地，减小泄露风险
 const password = ref('')
 const confirmPassword = ref('')
 
 const router = useRouter()
-const auth = useAuthStore()
 
-// 从 Pinia 获取表单与 captcha 状态
-const { captchaToken, lastCaptchaSvg, lastCaptchaSvgText,
-  registerUsername, regRole, contact, captchaInput,
-  errors, errorMessage, successMessage, isRegistering
-} = storeToRefs(auth)
+function getAuth() {
+  try { return useAuthStore() } catch (e) { console.debug('getAuth not ready', e); return null }
+}
+function getFormStore() {
+  try { return useFormStore() } catch (e) { console.debug('getFormStore not ready', e); return null }
+}
+function getCaptchaStore() {
+  try { return useCaptchaStore() } catch (e) { console.debug('getCaptchaStore not ready', e); return null }
+}
+
+// Defensive computed wrappers that call stores at access time
+const registerUsername = computed({ get: () => getAuth()?.registerUsername ?? '', set: (v: any) => { const a = getAuth(); if (a) a.registerUsername = v } })
+const regRole = computed({ get: () => getAuth()?.regRole ?? '', set: (v: any) => { const a = getAuth(); if (a) a.regRole = v } })
+const contact = computed({ get: () => getAuth()?.contact ?? '', set: (v: any) => { const a = getAuth(); if (a) a.contact = v } })
+const captchaInput = computed({ get: () => getAuth()?.captchaInput ?? '', set: (v: any) => { const a = getAuth(); if (a) a.captchaInput = v } })
+const isRegistering = computed({ get: () => getAuth()?.isRegistering ?? false, set: (v: any) => { const a = getAuth(); if (a) a.isRegistering = v } })
+
+const errors = computed(() => getFormStore()?.errors ?? {})
+const errorMessage = computed({ get: () => getFormStore()?.errorMessage ?? '', set: (v: any) => { const f = getFormStore(); if (f) f.errorMessage = v } })
+const successMessage = computed({ get: () => getFormStore()?.successMessage ?? '', set: (v: any) => { const f = getFormStore(); if (f) f.successMessage = v } })
+
+const captchaToken = computed(() => getCaptchaStore()?.captchaToken ?? '')
+const lastCaptchaSvg = computed(() => getCaptchaStore()?.lastCaptchaSvg ?? '')
+const lastCaptchaSvgText = computed(() => getCaptchaStore()?.lastCaptchaSvgText ?? '')
 
 // 清理敏感字段函数（供路由离开及页面失焦/隐藏时调用）
 function clearSensitive() {
   password.value = ''
   confirmPassword.value = ''
-  try { clearFieldError('password') } catch (e) { }
-  try { clearFieldError('confirmPassword') } catch (e) { }
+  try { getFormStore()?.clearFieldError?.('password') } catch (e) { console.debug('clearFieldError error', e) }
+  try { getFormStore()?.clearFieldError?.('confirmPassword') } catch (e) { console.debug('clearFieldError error', e) }
 }
 
-// functions
-const { fetchCaptcha, refreshCaptcha, submitRegister, clearFieldError, clearMessages } = auth
+// 将对 store 的方法调用延迟到运行时，避免在模块初始化时解构 store
+const submitRegister = async (pwd: string, conf: string) => {
+  const a = getAuth()
+  if (!a || !a.submitRegister) throw new Error('Auth store not ready')
+  return await a.submitRegister(pwd, conf)
+}
+const fetchCaptcha = async () => { return await getCaptchaStore()?.fetchCaptcha?.() }
+const refreshCaptcha = async () => { return await getCaptchaStore()?.refreshCaptcha?.() }
+const clearFieldError = (field: string) => { getFormStore()?.clearFieldError?.(field) }
+const clearMessages = () => { getFormStore()?.clearMessages?.() }
 
 // 表单验证
 const isFormValid = computed(() => {
@@ -162,10 +189,8 @@ const isFormValid = computed(() => {
          confirmPassword.value.trim() &&
          regRole.value && 
          contact.value.trim() &&
-         !Object.values(errors.value).some(error => error)
+         !Object.values(errors.value).some((error: any) => error)
 })
-
-// captchaInput 已由 Pinia 管理
 
 // 判断是否为可用的 HTML <svg> 文本（用于 v-html）
 const captchaHtmlPresent = computed(() => {
@@ -175,47 +200,40 @@ const captchaHtmlPresent = computed(() => {
 
 // captchaImage 从 store 的 captchaToken 或 svg 字段来显示
 const captchaImage = computed(() => {
-  // 如果后端直接返回 data-url 或我们已构造好 data-url，则使用它
   if (lastCaptchaSvg.value && /^data:image\/.+/.test(lastCaptchaSvg.value)) return lastCaptchaSvg.value
-  // 否则，如果后端返回的是原始 svgText，但不是 HTML（rare），把它编码为 data-url
   if (lastCaptchaSvgText.value && !captchaHtmlPresent.value) {
     try {
       return 'data:image/svg+xml;utf8,' + encodeURIComponent(lastCaptchaSvgText.value)
     } catch (e) {
+      console.debug('captchaImage encode error', e)
       return ''
     }
   }
   return ''
 })
 
-// 清除错误字段信息
-// clearFieldError / clearMessages 已由 Pinia 提供
-
-// 表单验证 由 Pinia store 的 validateFormLocal/submitRegister 管理
-
 // 错误处理函数
 const handleError = (error: unknown) => {
   console.error('注册错误:', error)
-  errorMessage.value = formatErrorMessage(error)
+  const f = getFormStore()
+  if (f) f.errorMessage = formatErrorMessage(error)
 }
 
 const handleRegister = async () => {
   try {
-  const result = await submitRegister(password.value, confirmPassword.value)
+    const result = await submitRegister(password.value, confirmPassword.value)
     if (result && result.ok) {
       // 注册成功，跳转到登录
       setTimeout(() => router.push('/login'), 2000)
       return
     }
 
-    // submitRegister 返回非 ok 的情况，统一交给 handleError 处理（后端可能返回对象或 axios 错误结构）
     if (result && result.data) {
       handleError(result.data)
     } else {
       handleError(new Error('注册失败'))
     }
   } catch (err) {
-    // 捕获 submitRegister 抛出的异常并交由统一错误处理函数处理
     handleError(err)
   }
 }
@@ -470,6 +488,8 @@ h2 {
   overflow: hidden;
   box-shadow: 0 2px 6px rgba(0,0,0,0.08);
   background: transparent;
+  --captcha-fill: #0b5ed7;
+  --captcha-stroke: rgba(0,0,0,0.08);
 }
 
 /* Use deep selector so scoped styles reach v-html-inserted SVG */
@@ -478,22 +498,17 @@ h2 {
   height: 100%;
   display: block;
 }
-.captcha-inline ::v-deep text {
-  font-family: 'Segoe UI', Roboto, system-ui, Arial, Helvetica, sans-serif;
-  font-weight: 700;
-  letter-spacing: 2px;
-  dominant-baseline: middle;
-}
 .captcha-inline ::v-deep line {
   mix-blend-mode: multiply;
 }
 
 /* tweak fills/strokes via CSS variables for easy theming */
-.captcha-inline {
-  --captcha-fill: #0b5ed7;
-  --captcha-stroke: rgba(0,0,0,0.08);
-}
+/* tweak fills/strokes via CSS variables for easy theming */
 .captcha-inline ::v-deep text {
+  font-family: 'Segoe UI', Roboto, system-ui, Arial, Helvetica, sans-serif;
+  font-weight: 700;
+  letter-spacing: 2px;
+  dominant-baseline: middle;
   fill: var(--captcha-fill) !important;
   stroke: var(--captcha-stroke);
   stroke-width: 0.4px;

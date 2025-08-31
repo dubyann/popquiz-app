@@ -144,7 +144,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useListenerStore } from '../../../../stores/listener'
-import { AuthManager } from '../../../../utils/auth'
 
 interface FeedbackType {
   type: string
@@ -407,6 +406,7 @@ function formatTime(dateString: string): string {
 
 .feedback-card {
   background: rgba(255, 255, 255, 0.8);
+  -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
   border-radius: 20px;
   padding: 2rem;
@@ -511,6 +511,7 @@ function formatTime(dateString: string): string {
   font-family: inherit;
   line-height: 1.5;
   background: rgba(255, 255, 255, 0.8);
+  -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
   resize: vertical;
   box-sizing: border-box;
@@ -730,6 +731,7 @@ function formatTime(dateString: string): string {
   padding: 4px;
   border: 1px solid rgba(16, 163, 127, 0.2);
   backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   box-shadow: 0 2px 12px rgba(16, 163, 127, 0.15);
 }
 

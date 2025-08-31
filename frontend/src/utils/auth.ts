@@ -6,14 +6,50 @@ export class AuthManager {
   private static readonly USE_SESSION_STORAGE = true // 设置为true使用sessionStorage，false使用localStorage
 
   // 获取token - 支持双存储后备
+  // 如果 USE_SESSION_STORAGE 为 true，则优先从 sessionStorage 读取，否则优先从 localStorage 读取
   static getToken(): string | null {
-    return localStorage.getItem(this.TOKEN_KEY) || sessionStorage.getItem(this.TOKEN_KEY)
+    try {
+      if (this.USE_SESSION_STORAGE) {
+        return sessionStorage.getItem(this.TOKEN_KEY) || localStorage.getItem(this.TOKEN_KEY)
+      }
+      return localStorage.getItem(this.TOKEN_KEY) || sessionStorage.getItem(this.TOKEN_KEY)
+    } catch (e) {
+      // 在某些受限环境（例如私有模式或 SSR）访问 storage 可能抛错
+      return null
+    }
   }
 
-  // 设置token - 同时存储到两个地方以确保可靠性
-  static setToken(token: string): void {
-    localStorage.setItem(this.TOKEN_KEY, token)
-    sessionStorage.setItem(this.TOKEN_KEY, token)
+  /**
+   * 设置 token
+   * @param token JWT 字符串，传 null 表示移除
+   * @param persist 是否持久化到 storage（默认 true）
+   * @param preferSession 可选 - 优先使用 sessionStorage（若提供则覆盖默认配置）
+   */
+  static setToken(token: string | null, persist = true, preferSession?: boolean): void {
+    try {
+      if (!token) {
+        this.removeToken()
+        return
+      }
+
+      const useSession = typeof preferSession === 'boolean' ? preferSession : this.USE_SESSION_STORAGE
+      if (persist) {
+        if (useSession) sessionStorage.setItem(this.TOKEN_KEY, token)
+        else localStorage.setItem(this.TOKEN_KEY, token)
+        // 同时写入另一处以提高容错（有时浏览器策略导致部分 storage 不可用）
+        try {
+          if (useSession) localStorage.setItem(this.TOKEN_KEY, token)
+          else sessionStorage.setItem(this.TOKEN_KEY, token)
+        } catch (e) {
+          // ignore secondary write error
+        }
+      } else {
+        // 非持久化：只写入 sessionStorage
+        try { sessionStorage.setItem(this.TOKEN_KEY, token) } catch (e) { /* ignore */ }
+      }
+    } catch (e) {
+      // ignore storage errors
+    }
   }
 
   // 移除token - 从两个存储中都移除
@@ -101,6 +137,19 @@ export class AuthManager {
       return null
     }
   }
+
+  /**
+   * 解析并返回 JWT payload（不改变存储）
+   */
+  static getPayload(): any | null {
+    const token = this.getToken()
+    if (!token) return null
+    try {
+      return JSON.parse(atob(token.split('.')[1]))
+    } catch (e) {
+      return null
+    }
+  }
 }
 
 // 页面可见性变化监听
@@ -164,3 +213,5 @@ export class VisibilityManager {
 
 // 自动初始化
 VisibilityManager.getInstance()
+
+export default AuthManager

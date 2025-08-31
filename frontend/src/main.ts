@@ -89,91 +89,106 @@ const router = createRouter({
 })
 
 // 路由守卫 - 防止已登录用户访问登录页，未登录用户访问需要认证的页面
-router.beforeEach((to, from, next) => {
-  // 使用 Pinia 管理的认证状态
-  // 因为 router.beforeEach 在应用启动时就会执行，使用直接读取 sessionStorage 作为兜底方案
-  // 若 Pinia 可用，prefer 使用 store
-  let token = sessionStorage.getItem('token')
+// 抽取 helper 函数以降低复杂度并便于测试
+function getToken(): string | null {
   try {
-    // 尝试从 store（已挂载）读取
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    
-    const auth = useAuthStore()
-    if (auth && auth.token) {
-      token = auth.token
-    }
+  // 延迟获取 auth store，避免在 Pinia 尚未安装时抛错
+  let auth: any = null
+  try { auth = useAuthStore() } catch (e) { /* not ready */ }
+  if (auth && auth.token) return auth.token as string
   } catch (e) {
-    // ignore - 在某些启动阶段 require 可能失败，继续使用 sessionStorage
+    // ignore if store not ready
+  }
+  return sessionStorage.getItem('token') || localStorage.getItem('token')
+}
+
+function parsePayload(token: string | null) {
+  if (!token) return null
+  try {
+    return JSON.parse(atob(token.split('.')[1]))
+  } catch (e) {
+    return null
+  }
+}
+
+function roleRedirectPath(role: string | undefined | null) {
+  if (!role) return '/login'
+  if (role === 'speaker') return '/speaker/home'
+  if (role === 'listener') return '/listener/home'
+  if (role === 'organizer') return '/organizer/home'
+  return '/login'
+}
+
+const protectedPaths = ['/speaker', '/listener', '/organizer']
+
+router.beforeEach((to, from, next) => {
+  const devEnv = (typeof import.meta !== 'undefined' && (import.meta as any).env) ? (import.meta as any).env : null
+  const devBypass = Boolean(devEnv && devEnv.DEV && to.query && to.query.debug === '1')
+
+  const token = getToken()
+  const payload = parsePayload(token)
+
+  console.debug('[ROUTE-GUARD]', { to: to.path, devBypass, tokenPresent: !!token, payload })
+
+  if (devBypass) {
+    console.info('[ROUTE-GUARD] DEV BYPASS enabled (to=' + to.path + ')')
+    next()
+    return
   }
 
   const isLoggedIn = !!token
-  const protectedPaths = ['/speaker', '/listener', '/organizer']
   const isProtectedPath = protectedPaths.some(path => to.path.startsWith(path))
 
-  if (to.path === '/' && isLoggedIn) {
-    try {
-      const payload = JSON.parse(atob((token as string).split('.')[1]))
-      const userRole = payload.role
-
-      if (userRole === 'speaker') {
-        next('/speaker/home')
-      } else if (userRole === 'listener') {
-        next('/listener/home')
-      } else {
-        next('/login')
-      }
-    } catch (e) {
+  // 根路径跳转
+  if (to.path === '/') {
+    if (isLoggedIn && payload) {
+      next(roleRedirectPath(payload.role))
+    } else {
       sessionStorage.removeItem('token')
       next('/login')
     }
     return
   }
 
+  // 已登录用户访问登录/注册页 -> 重定向到角色首页
   if (isLoggedIn && (to.path === '/login' || to.path === '/register')) {
-    try {
-      const payload = JSON.parse(atob((token as string).split('.')[1]))
-      const userRole = payload.role
-
-      if (userRole === 'speaker') {
-        next('/speaker/home')
-      } else if (userRole === 'listener') {
-        next('/listener/home')
-      } else {
-        next('/login')
-      }
-    } catch (e) {
+    if (payload) next(roleRedirectPath(payload.role))
+    else {
       sessionStorage.removeItem('token')
       next('/login')
     }
-  } else if (!isLoggedIn && isProtectedPath) {
-    next('/login')
-  } else if (isLoggedIn && isProtectedPath) {
-    try {
-      const payload = JSON.parse(atob((token as string).split('.')[1]))
-      const userRole = payload.role
-
-      if (to.path.startsWith('/speaker') && userRole !== 'speaker') {
-        next('/listener/home')
-      } else if (to.path.startsWith('/listener') && userRole !== 'listener') {
-        next('/speaker/home')
-      } else if (to.path.startsWith('/organizer') && userRole !== 'organizer') {
-        if (userRole === 'speaker') {
-          next('/speaker/home')
-        } else if (userRole === 'listener') {
-          next('/listener/home')
-        } else {
-          next('/login')
-        }
-      } else {
-        next()
-      }
-    } catch (e) {
-      sessionStorage.removeItem('token')
-      next('/login')
-    }
-  } else {
-    next()
+    return
   }
+
+  // 未登录访问受保护页面
+  if (!isLoggedIn && isProtectedPath) {
+    next('/login')
+    return
+  }
+
+  // 已登录访问受保护页面，检查角色是否匹配
+  if (isLoggedIn && isProtectedPath) {
+    if (!payload) {
+      sessionStorage.removeItem('token')
+      next('/login')
+      return
+    }
+
+    if (to.path.startsWith('/speaker') && payload.role !== 'speaker') {
+      next(roleRedirectPath(payload.role))
+      return
+    }
+    if (to.path.startsWith('/listener') && payload.role !== 'listener') {
+      next(roleRedirectPath(payload.role))
+      return
+    }
+    if (to.path.startsWith('/organizer') && payload.role !== 'organizer') {
+      next(roleRedirectPath(payload.role))
+      return
+    }
+  }
+
+  next()
 })
 
 const app = createApp(App)

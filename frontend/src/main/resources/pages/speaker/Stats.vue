@@ -156,228 +156,40 @@
 </template>
   
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, toRef } from 'vue'
 import { useRoute } from 'vue-router'
+import { useSpeakerStore } from '../../../../stores/speaker'
 
 const route = useRoute()
-const lectureId = route.params.id
+const lectureId = route.params.id as string
 
-const loading = ref(true)
-const lecture = ref<any>(null)
+function getSpeakerStore() { try { return useSpeakerStore() } catch (e) { console.debug('speakerStore not ready', e); return null } }
+const loading = toRef(getSpeakerStore() || { loadingLecture: false }, 'loadingLecture')
+const lecture = toRef(getSpeakerStore() || { currentLecture: null }, 'currentLecture')
 const selectedUser = ref<any>(null)
 const selectedUserAnswers = ref<any[]>([])
 
-// 获取讲座基本信息
-const fetchLectureInfo = async (id: string) => {
-  try {
-    const token = localStorage.getItem('token') || sessionStorage.getItem('token')
-    if (!token) {
-      console.error('未找到认证令牌')
-      return null
-    }
-
-    const response = await fetch(`/api/lectures/${id}`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      }
-    })
-    
-    if (response.ok) {
-      const data = await response.json()
-      console.log('讲座基本信息:', data)
-      // 根据后端返回的数据结构调整
-      return data.lecture || data
-    } else {
-      console.error('获取讲座信息失败:', response.status, response.statusText)
-      return null
-    }
-  } catch (error) {
-    console.error('获取讲座信息时出错:', error)
-    return null
-  }
-}
-
-// 获取讲座统计信息
-const fetchLectureStats = async (id: string) => {
-  try {
-    const token = localStorage.getItem('token') || sessionStorage.getItem('token')
-    if (!token) {
-      console.error('未找到认证令牌')
-      return null
-    }
-
-    const response = await fetch(`/api/statistics/lecture/${id}`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      }
-    })
-    
-    if (response.ok) {
-      const data = await response.json()
-      console.log('讲座统计数据:', data)
-      return data
-    } else {
-      console.error('获取讲座统计失败:', response.status, response.statusText)
-      return null
-    }
-  } catch (error) {
-    console.error('获取讲座统计失败:', error)
-    return null
-  }
-}
-
-// 获取题目统计信息
-const fetchQuizStats = async (id: string) => {
-  try {
-    const token = localStorage.getItem('token') || sessionStorage.getItem('token')
-    if (!token) {
-      console.error('未找到认证令牌')
-      return []
-    }
-
-    const response = await fetch(`/api/answers/lecture/${id}/stats`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      }
-    })
-    
-    if (response.ok) {
-      const data = await response.json()
-      console.log('题目统计数据:', data)
-      return data
-    } else {
-      console.error('获取题目统计失败:', response.status, response.statusText)
-      return []
-    }
-  } catch (error) {
-    console.error('获取题目统计失败:', error)
-    return []
-  }
-}
-
-// 获取用户答题详情
-const fetchUserAnswers = async (userId: number) => {
-  try {
-    const token = localStorage.getItem('token') || sessionStorage.getItem('token')
-    if (!token) {
-      console.error('未找到认证令牌')
-      return []
-    }
-
-    const response = await fetch(`/api/answers/lecture/${lectureId}/user/${userId}/answers`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      }
-    })
-    
-    if (response.ok) {
-      const data = await response.json()
-      console.log('用户答题详情:', data)
-      return data
-    } else {
-      console.error('获取用户答题详情失败:', response.status, response.statusText)
-      return []
-    }
-  } catch (error) {
-    console.error('获取用户答题详情失败:', error)
-    return []
-  }
-}
-
-// 获取讲座参与人数
-const fetchParticipantCount = async (id: string) => {
-  try {
-    const token = localStorage.getItem('token') || sessionStorage.getItem('token')
-    
-    const response = await fetch(`/api/participants/count/${id}`, {
-      headers: token ? {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      } : {
-        'Content-Type': 'application/json'
-      }
-    })
-    
-    if (response.ok) {
-      const data = await response.json()
-      console.log('参与人数数据:', data)
-      return data.participant_count || data.count || 0
-    } else {
-      console.error('获取参与人数失败:', response.status, response.statusText)
-      return 0
-    }
-  } catch (error) {
-    console.error('获取参与人数失败:', error)
-    return 0
-  }
-}
-
-// 加载当前讲座的数据
+// store 方法直接使用
 const loadData = async () => {
-  if (!lectureId) {
-    console.error('未找到讲座ID')
-    loading.value = false
-    return
-  }
-
-  loading.value = true
-  try {
-    console.log('开始加载讲座数据，ID:', lectureId)
-    
-    // 获取讲座基本信息
-    const lectureInfo = await fetchLectureInfo(lectureId as string)
-    if (!lectureInfo) {
-      console.error('无法获取讲座信息')
-      loading.value = false
-      return
-    }
-
-    // 获取讲座统计
-    const stats = await fetchLectureStats(lectureId as string)
-    console.log('统计数据:', stats)
-    
-    // 获取题目统计
-    const quizStats = await fetchQuizStats(lectureId as string)
-    console.log('题目统计:', quizStats)
-    
-    // 获取参与人数
-    const participantCount = await fetchParticipantCount(lectureId as string)
-    console.log('参与人数:', participantCount)
-    
-    // 构建讲座数据
-    lecture.value = {
-      ...lectureInfo,
-      overallStats: stats?.overallStats || {
-        total_users: stats?.rankings?.length || 0,
-        total_answers: 0,
-        total_correct: 0
-      },
-      userRankings: stats?.rankings || [],
-      participantCount: participantCount,
-      quizStats: quizStats || [],
-      quizCount: (quizStats || []).length
-    }
-    
-    console.log('最终讲座数据:', lecture.value)
-    
-  } catch (error) {
-    console.error('加载数据失败:', error)
-  }
-  loading.value = false
+  if (!lectureId) return
+  await speakerStore.loadLectureData(lectureId)
 }
 
-// 选择用户查看详情
+// 选择用户查看详情 (保留为局部实现，因为 store 当前不持有 per-user answers)
 const selectUser = async (user: any) => {
   selectedUser.value = user
   selectedUserAnswers.value = []
-  
-  // 获取用户答题详情
-  const answers = await fetchUserAnswers(user.user_id)
-  selectedUserAnswers.value = answers
+  try {
+    const token = sessionStorage.getItem('token') || localStorage.getItem('token') || ''
+    if (!token) return
+    const res = await fetch(`/api/answers/lecture/${lectureId}/user/${user.user_id}/answers`, {
+      headers: { Authorization: token.startsWith('Bearer ') ? token : `Bearer ${token}` }
+    })
+    if (res.ok) selectedUserAnswers.value = await res.json()
+  } catch (e) {
+    console.error('fetch user answers failed', e)
+    selectedUserAnswers.value = []
+  }
 }
 
 // 关闭用户详情

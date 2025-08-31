@@ -78,8 +78,9 @@
             
             <div class="modal-body">
               <div class="input-group">
-                <label>讲座ID</label>
+                <label for="lecture-id-input">讲座ID</label>
                 <input 
+                  id="lecture-id-input"
                   v-model="lectureId" 
                   type="text" 
                   placeholder="请输入6位讲座ID" 
@@ -114,24 +115,57 @@
   </div>
 </template>
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { toRef, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { useListenerStore } from '../../../../stores/listener'
 
 const router = useRouter()
+const listenerStore = useListenerStore() as any
 
-// 响应式数据
-const lectureId = ref('')
-const isJoining = ref(false)
-const showLectures = ref(false)
-const showCreate = ref(false)
-const myLectures = ref<{id: number, title: string, desc: string, speaker: string, status: number, participant_status: string}[]>([])
-const message = ref({
-  show: false,
-  type: 'success' as 'success' | 'error',
-  text: ''
+// 绑定 store 的状态
+const lectureId = toRef(listenerStore, 'modalLectureId')
+const isJoining = toRef(listenerStore, 'isJoining')
+const showLectures = toRef(listenerStore, 'showLectures')
+const showCreate = toRef(listenerStore, 'showCreate')
+const myLectures = toRef(listenerStore, 'myLectures')
+const message = toRef(listenerStore, 'message')
+
+// 直接使用 store 的方法
+const joinLecture = async () => {
+  try {
+    await listenerStore.joinLecture(String(lectureId.value))
+    // 成功后跳转到 quiz 页面
+    router.push(`/listener/lecture/${lectureId.value}/quiz`)
+  } catch (e) {
+    // joinLecture 内部会抛出或设置 message
+    console.debug('joinLecture error', e)
+  }
+}
+
+const rejoinLecture = async (lecture: any) => {
+  try {
+    await listenerStore.rejoinLecture(String(lecture.id))
+    if (lecture.status === 1) router.push(`/listener/lecture/${lecture.id}/quiz`)
+  } catch (e) {
+    console.debug('rejoinLecture error', e)
+  }
+}
+
+const fetchMyLectures = () => listenerStore.fetchMyLectures()
+const toggleLectures = () => listenerStore.setShowLectures(!showLectures.value)
+const viewLectureInfo = (lecture: any) => {
+  // 跳转逻辑保留在组件
+  if (lecture.participant_status === 'joined' && lecture.status === 1) router.push(`/listener/lecture/${lecture.id}/quiz`)
+  else if (lecture.status === 2) router.push(`/listener/lecture/${lecture.id}/score`)
+  else if (lecture.status === 1) router.push(`/listener/lecture/${lecture.id}/score`)
+  else listenerStore.showMessage('讲座尚未开始，暂无可查看内容', 'error')
+}
+
+onMounted(() => {
+  // defer fetching to user action
 })
 
-// 状态处理函数
+// 本地辅助函数（供模板使用）
 const getStatusText = (status: number) => {
   switch (status) {
     case 0: return '未开始'
@@ -149,264 +183,6 @@ const getStatusClass = (status: number) => {
     default: return 'status-unknown'
   }
 }
-
-// 显示消息
-const showMessage = (text: string, type: 'success' | 'error' = 'success') => {
-  message.value = { show: true, type, text }
-  setTimeout(() => {
-    message.value.show = false
-  }, 3000)
-}
-
-// 加入讲座
-const joinLecture = async () => {
-  if (!lectureId.value.trim()) {
-    showMessage('请输入讲座ID', 'error')
-    return
-  }
-
-  if (!/^\d{6}$/.test(lectureId.value.trim())) {
-    showMessage('讲座ID必须是6位数字', 'error')
-    return
-  }
-
-  isJoining.value = true
-  
-  try {
-    const token = sessionStorage.getItem('token')
-    if (!token) {
-      showMessage('请先登录', 'error')
-      router.push('/login')
-      return
-    }
-
-    // 1. 首先检查用户是否有未离开的讲座
-    const myLecturesResponse = await fetch('/api/participants/my-lectures', {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      }
-    })
-
-    if (myLecturesResponse.ok) {
-      const myLecturesData = await myLecturesResponse.json()
-      // 查找状态为joined且讲座未结束的讲座
-      const activeJoinedLecture = myLecturesData.find((lecture: any) => 
-        lecture.participant_status === 'joined' && lecture.status !== 2
-      )
-      
-      if (activeJoinedLecture) {
-        showMessage(`您正在参与"${activeJoinedLecture.title}"讲座，请先离开此讲座才能加入其他讲座`, 'error')
-        return
-      }
-    }
-
-    // 2. 检查目标讲座是否存在
-    const lectureResponse = await fetch(`/api/lectures/${lectureId.value}`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      }
-    })
-
-    if (!lectureResponse.ok) {
-      if (lectureResponse.status === 404) {
-        showMessage('讲座不存在，请检查ID是否正确', 'error')
-      } else {
-        showMessage('获取讲座信息失败', 'error')
-      }
-      return
-    }
-
-    const lectureData = await lectureResponse.json()
-
-    // 3. 检查用户是否已经加入过这个讲座
-    const checkHistoryResponse = await fetch(`/api/participants/check-history/${lectureId.value}`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      }
-    })
-
-    let hasJoinedBefore = false
-    if (checkHistoryResponse.ok) {
-      const checkData = await checkHistoryResponse.json()
-      hasJoinedBefore = checkData.hasJoined
-    }
-
-    // 4. 根据不同情况处理
-    if (hasJoinedBefore) {
-      // 用户已经加入过这个讲座
-      if (lectureData.status === 2) {
-        // 讲座已结束
-        showMessage('您已参与过此讲座，讲座已结束。请点击"已有讲座"中的相应讲座查看统计数据', 'error')
-      } else {
-        // 讲座未结束
-        showMessage('您已参与过此讲座。请点击"已有讲座"中的相应讲座重新进入', 'error')
-      }
-      return
-    }
-
-    // 5. 用户未加入过，检查讲座状态
-    if (lectureData.status === 2) {
-      // 讲座已结束，未加入过的用户不能加入
-      showMessage('讲座已结束，无法加入', 'error')
-      return
-    }
-
-    if (lectureData.status === 0) {
-      // 讲座未开始
-      showMessage('讲座尚未开始，请稍后再试', 'error')
-      return
-    }
-
-    // 6. 讲座进行中且用户未加入过，可以加入
-    const joinResponse = await fetch(`/api/participants/join/${lectureId.value}`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      }
-    })
-
-    if (!joinResponse.ok) {
-      const errorData = await joinResponse.json()
-      showMessage(errorData.message || '加入讲座失败', 'error')
-      return
-    }
-
-    // 成功加入讲座
-    showMessage('成功加入讲座！', 'success')
-    showCreate.value = false
-    
-    // 刷新讲座列表以显示新加入的讲座
-    if (showLectures.value) {
-      await fetchMyLectures()
-    }
-    
-    setTimeout(() => {
-      router.push(`/listener/lecture/${lectureId.value}/quiz`)
-    }, 1000)
-
-  } catch (error) {
-    console.error('加入讲座错误:', error)
-    showMessage('网络错误，请稍后重试', 'error')
-  } finally {
-    isJoining.value = false
-  }
-}
-
-// 切换我的讲座显示
-const toggleLectures = () => {
-  showLectures.value = !showLectures.value
-  if (showLectures.value && myLectures.value.length === 0) {
-    fetchMyLectures()
-  }
-}
-
-// 获取我的讲座
-const fetchMyLectures = async () => {
-  try {
-    const token = sessionStorage.getItem('token')
-    if (!token) return
-
-    const response = await fetch('/api/participants/my-lectures', {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      }
-    })
-
-    if (response.ok) {
-      const data = await response.json()
-      myLectures.value = data
-    }
-  } catch (error) {
-    console.error('获取讲座列表失败:', error)
-  }
-}
-
-// 重新进入讲座（仅适用于未结束的讲座）
-const rejoinLecture = async (lecture: any) => {
-  if (lecture.status === 2) {
-    showMessage('讲座已结束，无法重新进入', 'error')
-    return
-  }
-
-  try {
-    const token = sessionStorage.getItem('token')
-    if (!token) {
-      showMessage('请先登录', 'error')
-      router.push('/login')
-      return
-    }
-
-    const joinResponse = await fetch(`/api/participants/join/${lecture.id}`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      }
-    })
-
-    if (!joinResponse.ok) {
-      const errorData = await joinResponse.json()
-      showMessage(errorData.message || '重新加入讲座失败', 'error')
-      return
-    }
-
-    showMessage('成功重新加入讲座！', 'success')
-    
-    // 更新本地状态
-    lecture.participant_status = 'joined'
-    
-    // 刷新讲座列表以确保状态同步
-    await fetchMyLectures()
-    
-    // 根据讲座状态跳转
-    if (lecture.status === 1) {
-      // 讲座进行中，跳转到答题页面
-      router.push(`/listener/lecture/${lecture.id}/quiz`)
-    } else {
-      showMessage('讲座尚未开始', 'error')
-    }
-  } catch (error) {
-    console.error('重新加入讲座错误:', error)
-    showMessage('网络错误，请稍后重试', 'error')
-  }
-}
-
-// 查看讲座信息
-const viewLectureInfo = (lecture: any) => {
-  // 如果用户状态为joined且讲座进行中，跳转到答题页面
-  if (lecture.participant_status === 'joined' && lecture.status === 1) {
-    // 用户已加入且讲座进行中，跳转到答题页面
-    router.push(`/listener/lecture/${lecture.id}/quiz`)
-  } else if (lecture.status === 2) {
-    // 讲座已结束，跳转到统计页面
-    router.push(`/listener/lecture/${lecture.id}/score`)
-  } else if (lecture.status === 1) {
-    // 讲座进行中但用户已退出，跳转到统计页面查看信息（不能答题）
-    router.push(`/listener/lecture/${lecture.id}/score`)
-  } else if (lecture.status === 0) {
-    showMessage('讲座尚未开始，暂无可查看内容', 'error')
-  }
-}
-
-// 进入讲座（保持原有逻辑兼容性）
-const enterLecture = async (lecture: any) => {
-  // 如果用户已退出讲座且讲座未结束，需要先重新加入
-  if (lecture.participant_status === 'left' && lecture.status !== 2) {
-    await rejoinLecture(lecture)
-  } else {
-    // 其他情况直接查看信息
-    viewLectureInfo(lecture)
-  }
-}
-
-onMounted(() => {
-  // 页面加载时可以自动获取历史讲座
-})
 </script>
 <style scoped>
 /* 中心容器 */
@@ -451,6 +227,7 @@ onMounted(() => {
   flex-direction: column;
   align-items: center;
   background: rgba(255, 255, 255, 0.8);
+  -webkit-backdrop-filter: blur(20px);
   backdrop-filter: blur(20px);
   border-radius: 24px;
   padding: 3rem 2.5rem;
@@ -566,8 +343,8 @@ onMounted(() => {
 
 .create-btn.secondary {
   background: rgba(255, 255, 255, 0.9);
-  color: #10a37f;
   border: 2px solid #10a37f;
+  -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
 }
 
@@ -656,6 +433,7 @@ onMounted(() => {
 
 .lecture-card {
   background: rgba(255, 255, 255, 0.8);
+  -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
   border: 1px solid rgba(148, 163, 184, 0.2);
   border-radius: 16px;
@@ -858,6 +636,7 @@ onMounted(() => {
 
 .modal {
   background: rgba(255, 255, 255, 0.95);
+  -webkit-backdrop-filter: blur(20px);
   backdrop-filter: blur(20px);
   border-radius: 24px;
   width: 100%;
