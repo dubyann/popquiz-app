@@ -156,23 +156,22 @@
 </template>
   
 <script setup lang="ts">
-import { ref, onMounted, toRef } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useSpeakerStore } from '../../../../stores/speaker'
 
 const route = useRoute()
 const lectureId = route.params.id as string
-
 function getSpeakerStore() { try { return useSpeakerStore() } catch (e) { console.debug('speakerStore not ready', e); return null } }
-const loading = toRef(getSpeakerStore() || { loadingLecture: false }, 'loadingLecture')
-const lecture = toRef(getSpeakerStore() || { currentLecture: null }, 'currentLecture')
+const loading = computed(() => (getSpeakerStore() as any)?.loadingLecture ?? false)
+const lecture = computed(() => (getSpeakerStore() as any)?.currentLecture ?? null)
 const selectedUser = ref<any>(null)
 const selectedUserAnswers = ref<any[]>([])
 
 // store 方法直接使用
 const loadData = async () => {
   if (!lectureId) return
-  await speakerStore.loadLectureData(lectureId)
+  await (getSpeakerStore() as any)?.loadLectureData?.(lectureId)
 }
 
 // 选择用户查看详情 (保留为局部实现，因为 store 当前不持有 per-user answers)
