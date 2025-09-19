@@ -83,73 +83,66 @@
 </template>
 
 <script setup lang="ts">
+
+import api from '../../../utils/api'
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, onBeforeRouteLeave } from 'vue-router'
-import api from '../../../utils/api'
 import { useAuthStore } from '../../../stores/auth'
 import { useFormStore } from '../../../stores/form'
-// storeToRefs intentionally not used here to allow defensive computed wrappers
 import { formatErrorMessage } from '../../../utils/errorHandler'
 
 const router = useRouter()
 function getAuth() {
   try { return useAuthStore() } catch (err) { console.debug('useAuthStore not ready', err); return null }
 }
-
+const authStore = getAuth()
 // 从 Pinia 中解构表单/错误/消息相关状态，包含登录专属字段 logRole 和 isLoading
-const formStore = useFormStore()
+const fs = useFormStore()
 
 // 防御性包装：有时组件在 Pinia 未就绪时会得到 null，避免 storeToRefs 抛错
-// loginUsername / logRole / isLoading 提供与 store 同步的双向 computed
 const loginUsername = computed({
-  get: () => (getAuth() && (getAuth() as any).loginUsername) ?? '',
-  set: (v: any) => { const a = getAuth(); if (a) (a as any).loginUsername = v }
+  get: () => authStore?.loginUsername ?? '',
+  set: (v: string) => { if (authStore) authStore.loginUsername = v }
 })
 
 const logRole = computed({
-  get: () => (getAuth() && (getAuth() as any).logRole) ?? '',
-  set: (v: any) => { const a = getAuth(); if (a) (a as any).logRole = v }
+  get: () => authStore?.logRole ?? '',
+  set: (v: any) => { if (authStore) authStore.logRole = v }
 })
 
 const isLoading = computed({
-  get: () => (getAuth() && (getAuth() as any).isLoading) ?? false,
-  set: (v: any) => { const a = getAuth(); if (a) (a as any).isLoading = v }
+  get: () => (authStore && authStore.isLoading) ?? false,
+  set: (v: any) => { if (authStore) authStore.isLoading = v }
 })
 
-// formStore 通常可用，但也用防御性读取以免抛错
-const errors = computed(() => (formStore && (formStore as any).errors) ? (formStore as any).errors : {})
-const errorMessage = computed({ get: () => (formStore && (formStore as any).errorMessage) ?? '', set: (v: any) => { if (formStore) (formStore as any).errorMessage = v } })
-const successMessage = computed({ get: () => (formStore && (formStore as any).successMessage) ?? '', set: (v: any) => { if (formStore) (formStore as any).successMessage = v } })
-// password 保持在组件本地，避免明文保存在全局 store
+// 表单校验
+const isFormValid = computed(() => {
+  return loginUsername.value.trim() &&
+         password.value.trim() &&
+         logRole.value &&
+         !Object.values(errors.value).some(error => error)
+})
+// fs 通常可用，但也用防御性读取以免抛错
+const errors = computed(() => (fs && (fs as any).errors) ? (fs as any).errors : {})
+const errorMessage = computed({ 
+  get: () => (fs && (fs as any).errorMessage) ?? '', 
+  set: (v: any) => { if (fs) (fs as any).errorMessage = v } 
+})
+const successMessage = computed({ 
+  get: () => (fs && (fs as any).successMessage) ?? '', 
+  set: (v: any) => { if (fs) (fs as any).successMessage = v } 
+})
+
 const password = ref('')
 
 // 从 store 获取清理函数与校验函数
-const { clearFieldError, clearMessages } = formStore
-const validateLogin = (p?: string) => { const a = getAuth(); return a?.validateLogin ? (a as any).validateLogin(p) : true }
+const { clearFieldError, clearMessages } = fs
 
 // 清理敏感字段函数（供路由离开及页面失焦/隐藏时调用）
 function clearSensitive() {
   password.value = ''
   if (typeof clearFieldError === 'function') clearFieldError('password')
 }
-
-// 在路由离开时清理
-onBeforeRouteLeave((to, from, next) => {
-  clearSensitive()
-  next()
-})
-
-// 页面可见性与焦点监听
-onMounted(() => {
-  const onVisibility = () => { if (document.hidden) clearSensitive() }
-  const onBlur = () => clearSensitive()
-  window.addEventListener('visibilitychange', onVisibility)
-  window.addEventListener('blur', onBlur)
-})
-onUnmounted(() => {
-  window.removeEventListener('visibilitychange', () => {})
-  window.removeEventListener('blur', () => {})
-})
 
 // 错误处理（复用通用格式化，同时对登录场景做特定提示覆盖）
 const handleError = (error: any) => {
@@ -166,18 +159,72 @@ const handleError = (error: any) => {
   errorMessage.value = baseMsg
 }
 
-// 小工具：解析 role 文本
+// 登录表单校验
+function validateLogin() {
+  fs.clearMessages()
+
+  let isValid = true
+  const uname = loginUsername.value.trim()
+  const pwd = password.value.trim()
+  const role = logRole.value
+
+  // 用户名校验
+  if (!uname) {
+    fs.errors.username = '请输入用户名'
+    isValid = false
+  } else if (uname.length < 2) {
+    fs.errors.username = '用户名至少需要2个字符'
+    isValid = false
+  } else if (uname.length > 20) {
+    fs.errors.username = '用户名不能超过20个字符'
+    isValid = false
+  } else if (!/^[a-zA-Z0-9_\u4e00-\u9fa5]+$/.test(uname)) {
+    fs.errors.username = '用户名只能包含字母、数字、下划线和中文'
+    isValid = false
+  }
+
+  // 密码校验
+  if (!pwd) {
+    fs.errors.password = '请输入密码'
+    isValid = false
+  } else if (pwd.length < 4) {
+    fs.errors.password = '密码至少需要4个字符'
+    isValid = false
+  } else if (pwd.length > 50) {
+    fs.errors.password = '密码不能超过50个字符'
+    isValid = false
+  }
+
+  // 角色校验
+  if (!role) {
+    fs.errors.role = '请选择用户角色'
+    isValid = false
+  } else if (!['listener', 'speaker', 'organizer'].includes(role)) {
+    fs.errors.role = '请选择有效的用户角色'
+    isValid = false
+  }
+
+  return isValid
+}
+
+
+// 根据角色值获取中文描述
 function getRoleText(role: string) {
   if (role === 'listener') return '听众'
   if (role === 'speaker') return '演讲者'
   return '组织者'
 }
 
-async function fetchAndStoreUser() {
+// 获取并存储当前用户信息到 Pinia 和 localStorage
+async function storeUser() {
   try {
     const userRes = await api.get('/api/users/me')
     if (userRes?.data && userRes.data.id) {
-      try { localStorage.setItem('user', JSON.stringify(userRes.data)) } catch (e) { console.warn('Failed to persist user to localStorage', e) }
+      try { 
+        localStorage.setItem('user', JSON.stringify(userRes.data)) 
+      } catch (e) { 
+        console.warn('用户信息存储到本地失败', e) 
+      }
       const a = getAuth()
       if (a) a.user = userRes.data
     }
@@ -186,24 +233,29 @@ async function fetchAndStoreUser() {
   }
 }
 
+//路由
 function doRedirect(resData: any) {
   const finalRole = resData.role || logRole.value
-  if (finalRole === 'listener') router.push('/listener')
-  else if (finalRole === 'speaker') router.push('/speaker/index')
-  else router.push('/organizer')
+  if (finalRole === 'listener') router.replace('/listener/home')
+  else if (finalRole === 'speaker') router.replace('/speaker/home')
+  else router.replace('/organizer/home')
 }
 
-const isFormValid = computed(() => {
-  return loginUsername.value.trim() &&
-         password.value.trim() &&
-         logRole.value &&
-         !Object.values(errors.value).some(error => error)
-})
-
+//登录
 const handleLogin = async () => {
-  if (!validateLogin(password.value)) return
+
+  fs.clearMessages()
+
+  const isValid = validateLogin()
+  
+  
+
+  if (!isValid) {
+    errorMessage.value = '密码格式错误，请重新输入'
+    return { ok: false, message: '表单校验失败' }
+  }
   isLoading.value = true
-  clearMessages()
+  
 
   try {
     console.log('正在登录...', { 用户名: loginUsername.value, 角色: logRole.value })
@@ -214,11 +266,11 @@ const handleLogin = async () => {
     })
 
     if (res.data?.message === '登录成功' && res.data.token) {
-      const a = getAuth()
-      if (a && typeof a.setToken === 'function') a.setToken(res.data.token, true)
-      await fetchAndStoreUser()
+      const auth = getAuth()
+      if (auth && typeof auth.setToken === 'function') auth.setToken(res.data.token)
+      await storeUser()
       const roleText = getRoleText(logRole.value)
-      successMessage.value = `欢迎回来，${res.data.nickname || loginUsername.value}！正在跳转到${roleText}页面...`
+      successMessage.value = `欢迎回来，${loginUsername.value}！正在跳转到${roleText}页面...`
       setTimeout(() => doRedirect(res.data), 1500)
     } else {
       errorMessage.value = res.data?.error || '登录失败，请检查用户名和密码是否正确'
@@ -229,6 +281,26 @@ const handleLogin = async () => {
     isLoading.value = false
   }
 }
+
+// 在路由离开时清理
+onBeforeRouteLeave((to, from, next) => {
+  clearSensitive()
+  next()
+})
+
+// 页面可见性与焦点监听
+onMounted(() => {
+  const onVisibility = () => { if (document.hidden) clearSensitive() }
+  const onBlur = () => clearSensitive()
+  window.addEventListener('visibilitychange', onVisibility)
+  window.addEventListener('blur', onBlur)
+
+  onUnmounted(() => {
+    window.removeEventListener('visibilitychange', onVisibility)
+    window.removeEventListener('blur', onBlur)
+  })
+})
+
 </script>
 
 <style scoped>

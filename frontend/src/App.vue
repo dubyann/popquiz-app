@@ -5,8 +5,8 @@
       <div class="header-container">
         <div class="brand-section">
           <div class="brand-icon">🎓</div>
-          <h1 class="brand-title">PQ智能系统</h1>
-          <span class="brand-subtitle">智能讲座互动平台</span>
+          <h1 class="brand-title">SmartClass</h1>
+          <span class="brand-subtitle">AI出题测验平台</span>
         </div>
         <nav class="header-nav">
           <div class="nav-links">
@@ -135,9 +135,12 @@
 import { useRoute, useRouter } from 'vue-router'
 import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useAuthStore } from './stores/auth'
+import { useLectureStore } from './stores/lecture'
+import { storeToRefs } from 'pinia'
 
 const route = useRoute()
 const router = useRouter()
+const lectureStore = useLectureStore()
 
 // 设置下拉菜单状态
 const showSettingsDropdown = ref(false)
@@ -147,7 +150,7 @@ const participantCountTimer = ref(null) // 新增：参与者数量定时器
 const heartbeatTimer = ref(null) // 新增：心跳定时器
 
 // 结束讲座状态
-const isEndingLecture = ref(false)
+const { isEndingLecture } = storeToRefs(lectureStore)
 
 const isLectureLayout = computed(() => 
   route.path.startsWith('/speaker/lecture/') || route.path.startsWith('/listener/lecture/')
@@ -396,7 +399,7 @@ const handleEndLecture = async () => {
   
   if (confirm('确定要结束当前讲座吗？结束后听众将无法继续答题。')) {
     isEndingLecture.value = true
-    
+      
     try {
       const token = (auth && auth.token) || sessionStorage.getItem('token') || localStorage.getItem('token')
       if (!token) {

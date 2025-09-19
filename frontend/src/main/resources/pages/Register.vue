@@ -130,7 +130,6 @@ import { useRouter, onBeforeRouteLeave } from 'vue-router'
 import { useAuthStore } from '../../../stores/auth'
 import { useFormStore } from '../../../stores/form'
 import { useCaptchaStore } from '../../../stores/captcha'
-// 使用延迟 getter，不在模块顶层直接调用 useXStore()，以避免初始化时的循环依赖或 null 引用
 
 // 将密码放在组件本地，减小泄露风险
 const password = ref('')
@@ -148,16 +147,61 @@ function getCaptchaStore() {
   try { return useCaptchaStore() } catch (e) { console.debug('getCaptchaStore not ready', e); return null }
 }
 
-// Defensive computed wrappers that call stores at access time
-const registerUsername = computed({ get: () => getAuth()?.registerUsername ?? '', set: (v: any) => { const a = getAuth(); if (a) a.registerUsername = v } })
-const regRole = computed({ get: () => getAuth()?.regRole ?? '', set: (v: any) => { const a = getAuth(); if (a) a.regRole = v } })
-const contact = computed({ get: () => getAuth()?.contact ?? '', set: (v: any) => { const a = getAuth(); if (a) a.contact = v } })
-const captchaInput = computed({ get: () => getAuth()?.captchaInput ?? '', set: (v: any) => { const a = getAuth(); if (a) a.captchaInput = v } })
-const isRegistering = computed({ get: () => getAuth()?.isRegistering ?? false, set: (v: any) => { const a = getAuth(); if (a) a.isRegistering = v } })
+const registerUsername = computed({
+  get: () => getAuth()?.registerUsername ?? '',
+  set: (v: string) => {
+    const s = getAuth()
+    if (s) s.registerUsername = v
+  }
+})
+
+const regRole = computed({
+  get: () => getAuth()?.regRole ?? '',
+  set: (v: string) => {
+    const s = getAuth()
+    if (s) s.regRole = v
+  }
+})
+
+const contact = computed({
+  get: () => getAuth()?.contact ?? '',
+  set: (v: string) => {
+    const s = getAuth()
+    if (s) s.contact = v
+  }
+})
+
+const captchaInput = computed({
+  get: () => getAuth()?.captchaInput ?? '',
+  set: (v: string) => {
+    const s = getAuth()
+    if (s) s.captchaInput = v
+  }
+})
+
+const isRegistering = computed({
+  get: () => getAuth()?.isRegistering ?? false,
+  set: (v: boolean) => {
+    const s = getAuth()
+    if (s) s.isRegistering = v
+  }
+})
 
 const errors = computed(() => getFormStore()?.errors ?? {})
-const errorMessage = computed({ get: () => getFormStore()?.errorMessage ?? '', set: (v: any) => { const f = getFormStore(); if (f) f.errorMessage = v } })
-const successMessage = computed({ get: () => getFormStore()?.successMessage ?? '', set: (v: any) => { const f = getFormStore(); if (f) f.successMessage = v } })
+const errorMessage = computed({
+  get: () => getFormStore()?.errorMessage ?? '',
+  set: (v: string) => {
+    const s = getFormStore()
+    if (s) s.errorMessage = v
+  }
+})
+const successMessage = computed({
+  get: () => getFormStore()?.successMessage ?? '',
+  set: (v: string) => {
+    const s = getFormStore()
+    if (s) s.successMessage = v
+  }
+})
 
 const captchaToken = computed(() => getCaptchaStore()?.captchaToken ?? '')
 const lastCaptchaSvg = computed(() => getCaptchaStore()?.lastCaptchaSvg ?? '')
@@ -167,30 +211,35 @@ const lastCaptchaSvgText = computed(() => getCaptchaStore()?.lastCaptchaSvgText 
 function clearSensitive() {
   password.value = ''
   confirmPassword.value = ''
-  try { getFormStore()?.clearFieldError?.('password') } catch (e) { console.debug('clearFieldError error', e) }
-  try { getFormStore()?.clearFieldError?.('confirmPassword') } catch (e) { console.debug('clearFieldError error', e) }
+  getFormStore()?.clearFieldError?.('password')
+  getFormStore()?.clearFieldError?.('confirmPassword')
 }
 
-// 将对 store 的方法调用延迟到运行时，避免在模块初始化时解构 store
+// 延迟调用 store 方法
 const submitRegister = async (pwd: string, conf: string) => {
-  const a = getAuth()
-  if (!a || !a.submitRegister) throw new Error('Auth store not ready')
-  return await a.submitRegister(pwd, conf)
+  const s = getAuth()
+  if (!s || !s.submitRegister) throw new Error('Auth store 未准备好')
+  return await s.submitRegister(pwd, conf)
 }
-const fetchCaptcha = async () => { return await getCaptchaStore()?.fetchCaptcha?.() }
-const refreshCaptcha = async () => { return await getCaptchaStore()?.refreshCaptcha?.() }
-const clearFieldError = (field: string) => { getFormStore()?.clearFieldError?.(field) }
-const clearMessages = () => { getFormStore()?.clearMessages?.() }
+
+const fetchCaptcha = async () => await getCaptchaStore()?.fetchCaptcha?.()
+const refreshCaptcha = async () => await getCaptchaStore()?.refreshCaptcha?.()
+const clearFieldError = (field: string) => getFormStore()?.clearFieldError?.(field)
+const clearMessages = () => getFormStore()?.clearMessages?.()
+
 
 // 表单验证
 const isFormValid = computed(() => {
-  return registerUsername.value.trim() && 
-         password.value.trim() && 
-         confirmPassword.value.trim() &&
-         regRole.value && 
-         contact.value.trim() &&
-         !Object.values(errors.value).some((error: any) => error)
+  return (
+    registerUsername.value.trim() !== '' &&
+    password.value.trim() !== '' &&
+    confirmPassword.value.trim() !== '' &&
+    regRole.value !== '' &&
+    contact.value.trim() !== '' &&
+    !Object.values(errors.value).some(error => error)
+  )
 })
+
 
 // 判断是否为可用的 HTML <svg> 文本（用于 v-html）
 const captchaHtmlPresent = computed(() => {

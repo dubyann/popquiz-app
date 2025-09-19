@@ -1,7 +1,7 @@
 // ...existing code retained below
+import axios from 'axios'
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import axios from 'axios'
 import { useCaptchaStore } from './captcha'
 import { useFormStore } from './form'
 
@@ -28,6 +28,8 @@ export const useAuthStore = defineStore('auth', () => {
   function getCaptchaStore() {
     try { return useCaptchaStore() } catch (err) { console.debug('getCaptchaStore not ready', err); return null }
   }
+
+  const fs = getFormStore();
 
   // 本地 fallback（当 form/captcha store 尚不可用时使用）
   const _localErrors = ref<{ [k: string]: string }>({ username: '', password: '', confirmPassword: '', role: '', contact: '' })
@@ -86,71 +88,16 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  /**
-   * 清空所有消息与表单错误
-   */
-  function clearMessages() {
-    const fs = getFormStore()
-    if (fs && typeof fs.clearMessages === 'function') return fs.clearMessages()
-    _localErrorMessage.value = ''
-    _localSuccessMessage.value = ''
-    _localErrors.value = { username: '', password: '', confirmPassword: '', role: '', contact: '' }
-  }
-
-  /**
-   * 清除某个字段的错误
-   */
-  function clearFieldError(field: string) {
-    const fs = getFormStore()
-    try {
-      if (fs && typeof fs.clearFieldError === 'function') {
-        // @ts-ignore
-        return fs.clearFieldError(field)
-      }
-      // fallback
-      // @ts-ignore
-      _localErrors.value[field] = ''
-    } catch (e) {
-      // ignore
-    }
-    if (_localErrorMessage.value) _localErrorMessage.value = ''
-  }
-
   // ---------------------------
   // 表单校验（本地）
   // ---------------------------
-  /**
-   * 登录表单本地校验（供 Login 页面调用）
-   */
-  function validateLogin(p?: string) {
-    clearMessages()
-    let isValid = true
-    const uname = loginUsername.value.trim()
-    const pwd = (p || '').toString()
-    const fs = getFormStore()
-
-  if (!uname) { (fs ? (fs.errors as any) : _localErrors).username = '请输入用户名'; isValid = false }
-  else if (uname.length < 2) { (fs ? (fs.errors as any) : _localErrors).username = '用户名至少需要2个字符'; isValid = false }
-  else if (uname.length > 20) { (fs ? (fs.errors as any) : _localErrors).username = '用户名不能超过20个字符'; isValid = false }
-  else if (!/^[a-zA-Z0-9_\u4e00-\u9fa5]+$/.test(uname)) { (fs ? (fs.errors as any) : _localErrors).username = '用户名只能包含字母、数字、下划线和中文'; isValid = false }
-
-  if (!pwd) { (fs ? (fs.errors as any) : _localErrors).password = '请输入密码'; isValid = false }
-  else if (pwd.length < 4) { (fs ? (fs.errors as any) : _localErrors).password = '密码至少需要4个字符'; isValid = false }
-  else if (pwd.length > 50) { (fs ? (fs.errors as any) : _localErrors).password = '密码不能超过50个字符'; isValid = false }
-
-  if (!logRole.value) { (fs ? (fs.errors as any) : _localErrors).role = '请选择用户角色'; isValid = false }
-  else if (!['listener', 'speaker', 'organizer'].includes(logRole.value)) { (fs ? (fs.errors as any) : _localErrors).role = '请选择有效的用户角色'; isValid = false }
-
-    return isValid
-  }
 
   function validateFormLocal(p?: string, cp?: string) {
-    clearMessages()
+    if (fs) fs.clearMessages(); // 确保 fs 已经准备好
     let isValid = true
     const uname = registerUsername.value.trim()
     const pwd = (p || '').toString()
     const cPwd = (cp || '').toString()
-    const fs = getFormStore()
 
   if (!uname) { (fs ? (fs.errors as any) : _localErrors).username = '请输入用户名'; isValid = false }
   else if (uname.length < 2) { (fs ? (fs.errors as any) : _localErrors).username = '用户名至少需要2个字符'; isValid = false }
@@ -212,7 +159,7 @@ export const useAuthStore = defineStore('auth', () => {
   async function submitRegister(pwd?: string, confirmPwd?: string) {
     if (!validateFormLocal(pwd, confirmPwd)) return { ok: false }
     isRegistering.value = true
-    clearMessages()
+    if (fs) fs.clearMessages();
     try {
       const cs = getCaptchaStore()
       const payload: any = {
@@ -251,19 +198,15 @@ export const useAuthStore = defineStore('auth', () => {
   /**
    * 设置 token 并选择是否持久化到 localStorage（默认持久化）
    * @param t JWT token 字符串或 null
-   * @param persist 是否写入 localStorage（默认 true）
    */
-  function setToken(t: string | null, persist = true) {
+  function setToken(t: string | null) {
     token.value = t
     parseToken(t)
     // 尝试持久化到 localStorage（若环境不支持则静默失败）
     try {
-      if (persist) {
-        if (t) localStorage.setItem(TOKEN_KEY, t)
-        else localStorage.removeItem(TOKEN_KEY)
-      }
+      if (t) sessionStorage.setItem(TOKEN_KEY, t)
     } catch (e) {
-      // ignore storage errors (e.g., SSR or 私有模式)
+      console.debug('持久化失败',e)
     }
   }
 
@@ -272,23 +215,38 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = null
     role.value = null
     try {
-      localStorage.removeItem(TOKEN_KEY)
+      sessionStorage.removeItem(TOKEN_KEY)
     } catch (e) {
-      // ignore
+      console.debug('移除 token 失败', e)
     }
   }
 
   function clearAuth() {
     // 移除内存中的认证信息
     removeToken()
+    // 3. 重置状态管理
+    
+    token.value = null
+    user.value = null
+    role.value = null
+    loginUsername.value = ''
+    registerUsername.value = ''
+    regRole.value = ''
+    contact.value = ''
+    captchaInput.value = ''
+    isLoading.value = false
+    isRegistering.value = false
+
+    // 4. 跳转到登录页
+    //router.push('/login')
   }
 
-  // 初始化：尝试从 localStorage 恢复 token（若存在）
+  // 初始化：尝试从 sessionStorage 恢复 token（若存在）
   try {
-    const saved = localStorage.getItem(TOKEN_KEY)
-    if (saved) setToken(saved, true)
+    const saved = sessionStorage.getItem(TOKEN_KEY)
+    if (saved) setToken(saved)
   } catch (e) {
-    // ignore
+    console.debug('恢复 token 失败', e)
   }
 
   // ---------------------------
@@ -327,13 +285,10 @@ export const useAuthStore = defineStore('auth', () => {
     // login
     logRole,
     isLoading,
-    validateLogin,
-    clearFieldError,
-    clearMessages,
     validateFormLocal,
     submitRegister,
 
-    // 请求封装
+    // 请求封装)
     register
   }
 })

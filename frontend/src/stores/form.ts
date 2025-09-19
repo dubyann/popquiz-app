@@ -17,7 +17,7 @@ export const useFormStore = defineStore('form', () => {
       // @ts-ignore
       errors.value[field] = ''
     } catch (e) {
-      // ignore
+      console.error('清空失败：', e)
     }
     if (errorMessage.value) errorMessage.value = ''
   }

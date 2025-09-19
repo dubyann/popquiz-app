@@ -32,60 +32,77 @@ import AccountSettings from './main/resources/pages/profile/AccountSettings.vue'
 // 路由配置
 const routes = [
   { path: '/', redirect: '/login' },
-  { path: '/login', component: Login },
-  { path: '/register', component: Register },
+  { path: '/login', name: 'login', component: Login },
+  { path: '/register', name: 'register', component: Register },
 
-  { path: '/listener', redirect: '/listener/home' },
-  { path: '/listener/home', component: ListenerHome },
+  // Listener 模块
   {
-    path: '/listener/lecture/:id',
-    component: LectureLayout,
+    path: '/listener',
+    redirect: '/listener/home',
     children: [
-      { path: 'quiz', component: QuizPage },
-      { path: 'score', component: ScorePage },
-      { path: 'discussion', component: DiscussionPage },
-      { path: 'feedback', component: FeedbackPage }
-    ]
-  },
-  { path: '/speaker', component: SpeakerIndex },
-  { path: '/speaker', redirect: '/speaker/index' },
-  { path: '/speaker/index', component: SpeakerIndex },
-  { path: '/speaker', redirect: '/speaker/home' },
-  { path: '/speaker/home', component: SpeakerHome },
-  {
-    path: '/speaker/lecture/:id',
-    component: SpeakerLectureLayout,
-    children: [
-      { path: '', redirect: 'upload' },
-      { path: 'upload', component: SpeakerUpload },
-      { path: 'stats', component: SpeakerStats },
-      { path: 'discussion', component: SpeakerDiscussion },
-      { path: 'feedback', component: SpeakerFeedback }
+      { path: 'home', name: '', component: ListenerHome },
+      {
+        path: 'lecture/:id',
+        component: LectureLayout,
+        children: [
+          { path: 'quiz', name: 'listener-quiz', component: QuizPage },
+          { path: 'score', name: 'listener-score', component: ScorePage },
+          { path: 'discussion', name: 'listener-discussion', component: DiscussionPage },
+          { path: 'feedback', name: 'listener-feedback', component: FeedbackPage }
+        ]
+      }
     ]
   },
 
-  // organizer 路由
-  { path: '/organizer', redirect: '/organizer/home' },
-  { path: '/organizer/home', component: OrganizerHome },
+  // Speaker 模块
   {
-    path: '/organizer/lectures/:id',
-    component: OrganizerLectureLayout,
+    path: '/speaker',
+    redirect: '/speaker/home',
     children: [
-      { path: '', redirect: 'score' },
-      { path: 'score', name: 'OrganizerScorePage', component: OrganizerScorePage },
-      { path: 'discussion', component: OrganizerDiscussionPage },
-      { path: 'feedback', component: OrganizerFeedbackPage }
+      { path: 'index', name: 'speaker-index', component: SpeakerIndex },
+      { path: 'home', name: 'speaker-home', component: SpeakerHome },
+      {
+        path: 'lecture/:id',
+        component: SpeakerLectureLayout,
+        children: [
+          { path: '', redirect: 'upload' },
+          { path: 'upload', name: 'speaker-upload', component: SpeakerUpload },
+          { path: 'stats', name: 'speaker-stats', component: SpeakerStats },
+          { path: 'discussion', name: 'speaker-discussion', component: SpeakerDiscussion },
+          { path: 'feedback', name: 'speaker-feedback', component: SpeakerFeedback }
+        ]
+      }
     ]
   },
-  // profile 路由
-  { path: '/profile/edit', component: EditProfile },
-  { path: '/profile/change-password', component: ChangePassword },
-  { path: '/profile/settings', component: AccountSettings },
-];
+
+  // Organizer 模块
+  {
+    path: '/organizer',
+    redirect: '/organizer/home',
+    children: [
+      { path: 'home', name: 'organizer-home', component: OrganizerHome },
+      {
+        path: 'lectures/:id',
+        component: OrganizerLectureLayout,
+        children: [
+          { path: '', redirect: 'score' },
+          { path: 'score', name: 'organizer-score', component: OrganizerScorePage },
+          { path: 'discussion', name: 'organizer-discussion', component: OrganizerDiscussionPage },
+          { path: 'feedback', name: 'organizer-feedback', component: OrganizerFeedbackPage }
+        ]
+      }
+    ]
+  },
+
+  // Profile 模块
+  { path: '/profile/edit', name: 'profile-edit', component: EditProfile },
+  { path: '/profile/change-password', name: 'profile-change-password', component: ChangePassword },
+  { path: '/profile/settings', name: 'profile-settings', component: AccountSettings },
+]
 
 const router = createRouter({
   history: createWebHistory(),
-  routes
+  routes: routes
 })
 
 // 路由守卫 - 防止已登录用户访问登录页，未登录用户访问需要认证的页面
@@ -94,21 +111,16 @@ function getToken(): string | null {
   try {
   // 延迟获取 auth store，避免在 Pinia 尚未安装时抛错
   let auth: any = null
-  try { auth = useAuthStore() } catch (e) { /* not ready */ }
+  try { 
+    auth = useAuthStore() 
+  } catch (e) { 
+    console.debug('AuthStore 还没有准备好', e)
+  }
   if (auth && auth.token) return auth.token as string
   } catch (e) {
-    // ignore if store not ready
+    console.error('getToken 异常', e)
   }
-  return sessionStorage.getItem('token') || localStorage.getItem('token')
-}
-
-function parsePayload(token: string | null) {
-  if (!token) return null
-  try {
-    return JSON.parse(atob(token.split('.')[1]))
-  } catch (e) {
-    return null
-  }
+  return sessionStorage.getItem('token')
 }
 
 function roleRedirectPath(role: string | undefined | null) {
@@ -122,13 +134,13 @@ function roleRedirectPath(role: string | undefined | null) {
 const protectedPaths = ['/speaker', '/listener', '/organizer']
 
 router.beforeEach((to, from, next) => {
+  const authStore = useAuthStore()
   const devEnv = (typeof import.meta !== 'undefined' && (import.meta as any).env) ? (import.meta as any).env : null
   const devBypass = Boolean(devEnv && devEnv.DEV && to.query && to.query.debug === '1')
 
   const token = getToken()
-  const payload = parsePayload(token)
 
-  console.debug('[ROUTE-GUARD]', { to: to.path, devBypass, tokenPresent: !!token, payload })
+  console.debug('[ROUTE-GUARD]', { to: to.path, devBypass, tokenPresent: !!token, authStore: authStore.isLoggedIn, role: authStore.role })
 
   if (devBypass) {
     console.info('[ROUTE-GUARD] DEV BYPASS enabled (to=' + to.path + ')')
@@ -136,13 +148,12 @@ router.beforeEach((to, from, next) => {
     return
   }
 
-  const isLoggedIn = !!token
   const isProtectedPath = protectedPaths.some(path => to.path.startsWith(path))
 
   // 根路径跳转
   if (to.path === '/') {
-    if (isLoggedIn && payload) {
-      next(roleRedirectPath(payload.role))
+    if (authStore.isLoggedIn && token) {
+      next(roleRedirectPath(authStore.role))
     } else {
       sessionStorage.removeItem('token')
       next('/login')
@@ -151,8 +162,8 @@ router.beforeEach((to, from, next) => {
   }
 
   // 已登录用户访问登录/注册页 -> 重定向到角色首页
-  if (isLoggedIn && (to.path === '/login' || to.path === '/register')) {
-    if (payload) next(roleRedirectPath(payload.role))
+  if (authStore.isLoggedIn && (to.path === '/login' || to.path === '/register')) {
+    if (authStore.role) next(roleRedirectPath(authStore.role))
     else {
       sessionStorage.removeItem('token')
       next('/login')
@@ -161,29 +172,29 @@ router.beforeEach((to, from, next) => {
   }
 
   // 未登录访问受保护页面
-  if (!isLoggedIn && isProtectedPath) {
+  if (!authStore.isLoggedIn && isProtectedPath) {
     next('/login')
     return
   }
 
   // 已登录访问受保护页面，检查角色是否匹配
-  if (isLoggedIn && isProtectedPath) {
-    if (!payload) {
+  if (authStore.isLoggedIn && isProtectedPath) {
+    if (!token) {
       sessionStorage.removeItem('token')
       next('/login')
       return
     }
 
-    if (to.path.startsWith('/speaker') && payload.role !== 'speaker') {
-      next(roleRedirectPath(payload.role))
+    if (to.path.startsWith('/speaker') && authStore.role !== 'speaker') {
+      next(roleRedirectPath(authStore.role))
       return
     }
-    if (to.path.startsWith('/listener') && payload.role !== 'listener') {
-      next(roleRedirectPath(payload.role))
+    if (to.path.startsWith('/listener') && authStore.role !== 'listener') {
+      next(roleRedirectPath(authStore.role))
       return
     }
-    if (to.path.startsWith('/organizer') && payload.role !== 'organizer') {
-      next(roleRedirectPath(payload.role))
+    if (to.path.startsWith('/organizer') && authStore.role !== 'organizer') {
+      next(roleRedirectPath(authStore.role))
       return
     }
   }
