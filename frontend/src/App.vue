@@ -125,7 +125,7 @@
     <!-- 简洁页脚 -->
     <footer class="app-footer">
       <div class="footer-container">
-        <small>© 2025 PopQuiz-app Web. 保留所有权利.</small>
+        <small>© 2025 Smart-Class Web. 保留所有权利.</small>
       </div>
     </footer>
   </div>

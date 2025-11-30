@@ -16,10 +16,12 @@ const pool = require('../models/db');
    返回: { message, lecture: { id, title, name, created_at } }
 */
 async function createLecture(req, res) {
-  const { title, description } = req.body;
+  const { title, description ,name} = req.body;
   const user = req.user;
+  console.log('创建讲座请求体:', req.body);
+  console.log('创建讲座用户:', user);
   // name 必填
-  if (user.role !== 'speaker' || !user.name) {
+  if (user.role !== 'speaker' || !name) {
     return res.status(403).json({ error: '只有讲者可以创建讲座，且必须填写讲者姓名' });
   }
   if (!title || !description) {
@@ -72,7 +74,7 @@ async function createLecture(req, res) {
     // 使用指定的ID创建讲座
     await pool.promise().query(
       'INSERT INTO lectures (id, title, description, speaker_id, name, created_at) VALUES (?, ?, ?, ?, ?, NOW())',
-      [lectureId, title, description, user.userId, user.name]
+      [lectureId, title, description, user.userId, name]
     );
     
     // 获取创建的讲座信息
