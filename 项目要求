@@ -1,4 +1,4 @@
-# popquiz-app
+# SmartClass
 PopQuiz - using AI to give smart pop quiz about any content, a quick and easy way to check the audience "have you paid attention". Knowledge is free, but you have to pay attention.
 1.	输入收集： 把各种模态的输入变为文字，保存到数据库。
 1.1 输入是文本文件
